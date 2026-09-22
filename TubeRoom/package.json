@@ -1,0 +1,16 @@
+{
+  "name": "tube-room",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Five-tube controller using stock WLED onboard effects and microphones.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node runner.mjs",
+    "test": "node --test test/*.test.mjs",
+    "build:update": "node scripts/build-update.mjs"
+  },
+  "updateSource": "https://raw.githubusercontent.com/adam-cech/tuberoom-updates/refs/heads/main/latest.tuberoom-update.json"
+}

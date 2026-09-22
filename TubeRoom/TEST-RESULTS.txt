@@ -1,0 +1,18 @@
+TubeRoom 1.2.0 — 2026-09-22
+
+8 automated tests passed with node --test test/*.test.mjs:
+- UI: two groups, RGB edits, tube mic selection, layout, no WebAudio.
+- Version 1 settings migration preserves connections, layout and colors.
+- Firmware effect-name discovery, RGB payloads, full-strip bounds, group isolation.
+- Free preset allocation and config validation.
+- Five mock controllers through HTTP: microphone rollback/sender switching,
+  preserved mic pins, timed playlist ownership/cleanup, restart persistence,
+  unreachable-controller recovery, blackout, live pixel sampling, zero DDP
+  output, no heartbeat dependency or continuous lighting traffic.
+- Corrupt, incomplete, malicious and downgrade app-update rejection.
+- App update restart, failed-start recovery and rollback preserve settings.
+- Feed checking validates downloads; offline failure leaves installation intact.
+
+Syntax checks passed for all executable app files. Update package validated.
+No physical WLED hardware or real Safari viewport testing was available.
+Browser binary was unavailable; UI verified using the browser API harness.
