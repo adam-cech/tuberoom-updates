@@ -7,14 +7,14 @@ export const effects=[
  {id:'scroll',name:'Scroll',native:['Chase 2'],tag:'WITHIN TUBE',colors:2,description:'Two colors travel along each tube. Not a chase between fixtures.'},
  {id:'rainbow',name:'Rainbow',native:['Colorloop'],tag:'TIMED',colors:0,description:'The whole tube cycles through rainbow hues.'},
  {id:'strobe',name:'Strobe',native:['Strobe'],tag:'TIMED',colors:2,description:'Timed flashes. This stock effect is not audio triggered.'},
- {id:'loop',name:'Color loop',native:['Solid'],tag:'TIMED SEQUENCE',colors:12,description:'Your ordered colors, played by an onboard WLED playlist. Timing is approximate across tubes.'},
+ {id:'loop',name:'Color loop',native:['Solid'],tag:'BEAT OR TIMER',colors:12,description:'Your ordered colors advance on tube-detected beats, or an optional timer. Beat mode needs TubeRoom running on an awake Mac.'},
  {id:'plasmoid',name:'Sound pulse',native:['Plasmoid'],tag:'AUDIO',audio:true,colors:3,description:'Sound gates a flowing pattern. Uses onboard Plasmoid; not a uniform full-tube pulse.'},
  {id:'flashes',name:'Sound flashes',native:['Puddlepeak'],tag:'AUDIO',audio:true,colors:3,description:'Sound peaks create patches of light. Stock WLED cannot make this an exact full-tube beat strobe.'},
  {id:'ripples',name:'Sound ripples',native:['Ripple Peak'],tag:'AUDIO',audio:true,colors:3,description:'Sound peaks launch ripples. Their positions can differ between tubes.'},
  {id:'center',name:'Sound center',native:['Gravcenter'],tag:'AUDIO',audio:true,colors:3,description:'Sound-responsive light grows from the tube center.'},
  {id:'dj',name:'DJ color',native:['DJ Light'],tag:'AUDIO',audio:true,colors:0,description:'Bass, mids and highs drive generated RGB colors. Not a custom beat-color sequence.'}
 ];
-const group=i=>({id:i,name:'Group '+String.fromCharCode(65+i),effect:'fixed',brightness:.3,speed:128,intensity:128,colors:['#38bdf8','#000000','#ff408c'],seconds:2,fade:0,params:{}});
+const group=i=>({id:i,name:'Group '+String.fromCharCode(65+i),effect:'fixed',brightness:.3,speed:128,intensity:128,colors:['#38bdf8','#000000','#ff408c'],seconds:2,fade:0,loopTrigger:'beat',params:{}});
 export function defaults(){return {version:2,microphone:0,groups:[group(0),group(1)],tubes:Array.from({length:5},(_,i)=>({id:i,name:`Tube ${i+1}`,ip:'',count:100,x:180+i*160,y:300,angle:0,length:230,reverse:false,enabled:true,group:i<3?0:1}))};}
 export function cleanConfig(input={},base=defaults()){
  const c=structuredClone(base);c.version=2;
@@ -25,7 +25,7 @@ export function cleanConfig(input={},base=defaults()){
  if('microphone'in input)c.microphone=Math.round(clamp(input.microphone,0,4));
  // Preserve connections/layout/colors from version 1 while moving safely to a static effect.
  if(input.version===1&&!input.groups)c.groups=c.groups.map(g=>({...g,brightness:clamp(input.brightness??.3),colors:[input.colorA||'#38bdf8',input.colorB||'#ff408c','#000000']}));
- if(input.groups){if(!Array.isArray(input.groups)||input.groups.length!==2)throw Error('Two groups are required.');c.groups=input.groups.map((g,i)=>{if(!effects.some(e=>e.id===g.effect))throw Error('Unknown onboard effect.');if(!Array.isArray(g.colors)||g.colors.length<1||g.colors.length>12||g.colors.some(x=>!/^#[\da-f]{6}$/i.test(x)))throw Error('Choose 1–12 RGB colors.');const params={};for(const k of ['c1','c2','c3','o1','o2','o3'])if(k in (g.params||{}))params[k]=k[0]==='o'?!!g.params[k]:Math.round(clamp(g.params[k],0,k==='c3'?31:255));return {...group(i),name:String(g.name||group(i).name).slice(0,24),effect:g.effect,colors:g.colors,brightness:clamp(g.brightness),speed:Math.round(clamp(g.speed,0,255)),intensity:Math.round(clamp(g.intensity,0,255)),seconds:clamp(g.seconds,.2,60),fade:clamp(g.fade,0,10),params};});}
+ if(input.groups){if(!Array.isArray(input.groups)||input.groups.length!==2)throw Error('Two groups are required.');c.groups=input.groups.map((g,i)=>{if(!effects.some(e=>e.id===g.effect))throw Error('Unknown onboard effect.');if(!Array.isArray(g.colors)||g.colors.length<1||g.colors.length>12||g.colors.some(x=>!/^#[\da-f]{6}$/i.test(x)))throw Error('Choose 1–12 RGB colors.');const params={};for(const k of ['c1','c2','c3','o1','o2','o3'])if(k in (g.params||{}))params[k]=k[0]==='o'?!!g.params[k]:Math.round(clamp(g.params[k],0,k==='c3'?31:255));return {...group(i),name:String(g.name||group(i).name).slice(0,24),effect:g.effect,colors:g.colors,brightness:clamp(g.brightness),speed:Math.round(clamp(g.speed,0,255)),intensity:Math.round(clamp(g.intensity,0,255)),seconds:clamp(g.seconds,.2,60),fade:clamp(g.fade,0,10),loopTrigger:g.loopTrigger==='beat'?'beat':'time',params};});}
  if(input.tubes){if(!Array.isArray(input.tubes)||input.tubes.length!==5)throw Error('Exactly five tube slots are required.');c.tubes=input.tubes.map((t,i)=>({id:i,name:String(t.name||`Tube ${i+1}`).slice(0,30),ip:String(t.ip||'').trim(),count:Math.round(clamp(t.count,1,1500)),x:clamp(t.x,45,955),y:clamp(t.y,45,555),angle:clamp(t.angle,-180,180),length:clamp(t.length,50,420),reverse:!!t.reverse,enabled:t.enabled!==false,group:t.group===1?1:t.group===0?0:i<3?0:1}));}
  return c;
 }
@@ -36,3 +36,14 @@ export function payload(g,t,d,s){const {e,fx}=nativeEffect(g,d);const colors=g.c
 }
 export function restorePayload(s){const p=structuredClone(s);for(const k of ['ps','pl','time','tb','nl','u','AudioReactive'])delete p[k];return {...p,live:false,lor:s.lor??0,transition:0,udpn:{...s.udpn,nn:true}};}
 export function availablePresets(presets,n){const free=[];for(let i=200;i<=250&&free.length<n;i++)if(!Object.hasOwn(presets,String(i)))free.push(i);if(free.length<n)throw Error('Not enough free WLED preset slots (200–250). Existing presets were not changed.');return free;}
+
+export const isBeatLoop=g=>g.effect==='loop'&&g.loopTrigger==='beat';
+// WLED Audio Sync v2: 44-byte packed packet, flag at byte 16. No audio FFT here.
+export function decodeAudioSync(packet){
+ if(!Buffer.isBuffer(packet)||packet.length!==44||packet.subarray(0,6).toString('ascii')!=='00002\0')return null;
+ return {peak:packet[16]>0};
+}
+export class BeatGate {
+ constructor(gap=180){this.gap=gap;this.last=-Infinity;}
+ accept(packet,now){const data=decodeAudioSync(packet);if(!data)return {valid:false,beat:false};const beat=data.peak&&now-this.last>=this.gap;if(beat)this.last=now;return {valid:true,beat};}
+}

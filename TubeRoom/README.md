@@ -1,6 +1,6 @@
-# TubeRoom 1.2 — stock WLED edition
+# TubeRoom 1.2.1 — stock WLED edition
 
-A local Mac controller for five WLED tubes. The Mac sends configuration commands; WLED does audio analysis and generates the lights. No firmware is installed, patched or replaced. No npm dependencies.
+A local Mac controller for five WLED tubes. WLED performs audio analysis and renders the lights. For the optional beat color loop, the Mac receives the selected tube’s peak flags and sends each color change; other effects run autonomously on WLED. No firmware is installed, patched or replaced. No npm dependencies.
 
 ## Install this update
 
@@ -12,7 +12,7 @@ In the existing app: Updates → Check for updates → Install & restart. Altern
 2. Setup → enter/discover each IP → assign Group A or B → Check & save. Pixel counts and installed effects are read from each controller.
 3. Choose the source tube in the Microphone selector and click Connect. This reads the existing AudioReactive configuration, preserves mic type/pins/gain, configures one sender and the remaining compatible tubes as receivers, and restarts changed controllers. A physical microphone must already work in WLED. Missing/locked/incompatible AudioReactive support is reported; firmware is never installed to fill the gap.
 4. Choose a group, effect, brightness and colors. Start lights. Changes while running are applied with Apply groups.
-5. Closing Safari, hiding its tab, sleeping the Mac or closing the launcher leaves the lights running. Blackout turns reachable enabled tubes off. Stop & restore returns the prior basic WLED state. A previously running WLED playlist may need to be restarted manually.
+5. Closing Safari or hiding its tab is fine. Beat color loops need the launcher running and the Mac awake; otherwise they hold the last color. Other onboard effects keep running independently. Blackout turns reachable enabled tubes off. Stop & restore returns the prior basic WLED state. A previously running WLED playlist may need to be restarted manually.
 
 ## Included effects and honest limits
 
@@ -24,7 +24,7 @@ In the existing app: Updates → Check for updates → Install & restart. Altern
 | Scroll | Chase 2; within each tube, not a fixture-to-fixture chase |
 | Rainbow | Colorloop; generated hues |
 | Strobe | Strobe; timed, not audio-triggered |
-| Color loop | Onboard playlist of up to 12 ordered RGB colors; timed, not beat-triggered |
+| Color loop | Up to 12 ordered RGB colors, advancing on tube-detected beats via the Mac relay; optional onboard timer |
 | Sound pulse | Plasmoid; sound-gated flowing pattern |
 | Sound flashes | Puddlepeak; sound-triggered patches, not a full-tube beat strobe |
 | Sound ripples | Ripple Peak |
@@ -35,7 +35,19 @@ Effects are resolved by name against the actual device effect list, never hardco
 
 No universal frequency-range filter is offered: stock WLED's range controls in Freqmatrix/Freqwave map frequency to hue, and peak-driven receivers consume the sender's peak flag. Claiming independent frequency triggers from these controls would be misleading. Sound sensitivity/intensity controls are shown where the selected effect supports them. Microphone gain/noise floor/AGC remain available through a direct link to WLED settings.
 
-Custom beat-by-beat color sequences, exact synchronized full-tube audio strobe, room-position-driven effects and precisely coordinated fixture chases are not implemented without additional firmware or a computer lighting engine. Sharing sound does not guarantee frame-locked animations; random effects and timed playlists may drift between tubes.
+Beat color sequences are supported through the optional Mac relay. Exact synchronized full-tube audio strobe, room-position-driven effects and precisely coordinated fixture chases remain unsupported. Sharing sound does not guarantee frame-locked animations; random effects and timed playlists may drift between tubes.
+
+## Beat color loop
+
+Choose a group → Color loop → On each beat. Set and reorder the colors, connect your chosen tube microphone, then Start lights (or Apply groups if already running). New selections default to beat mode; old saved timed loops retain their timer until you switch them.
+
+The Mac subscribes to WLED Audio Sync multicast `239.0.0.1` on the selected sender’s configured audio port (usually 11988). It accepts only 44-byte v2 packets with the `00002` header from that tube’s IP, and uses the reported peak flag. No Mac microphone, FFT, guessed BPM, scheduled beats or timer fallback is used. Closely spaced flags within 180 ms are suppressed to reduce double hits. WLED’s built-in detector identifies sound peaks; it may not match every musical beat.
+
+A valid received trigger moves each beat-enabled group forward by one entry, wrapping independently through its own color list. Commands go to that group’s tubes concurrently. Non-beat groups are untouched. No presets are written in beat mode. Slow requests are serialized; pending changes collapse to the latest beat index to avoid an ever-growing late queue, so a congested or unreachable tube can miss a displayed color. Delivery failures appear in the UI.
+
+Silence or lost audio packets holds the last color. Starting without a valid sender stream fails with connection guidance instead of silently substituting simulated audio. The display reports stream status, tube trigger count and current color index. After restarting the launcher, an existing beat session stays paused until Resume beat relay is clicked. Stop/Blackout drains in-flight beat writes before restoring/switching off, so a delayed command cannot relight a tube afterward.
+
+Beat mode requires the Mac awake and the launcher running. Safari does not need to stay open or in front. This is the explicit exception to the otherwise autonomous onboard playback; controller firmware remains unchanged. The optional timer uses WLED playlists and continues without the Mac.
 
 ## Colors and room preview
 
@@ -53,7 +65,7 @@ User data is in `~/Library/Application Support/TubeRoom`. App update packages re
 
 ## Development and validation
 
-Run `node --test test/*.test.mjs`. The suite exercises five mock WLED devices through actual HTTP, verifies independent RGB/effect state, microphone sender switching and rollback, zero DDP traffic, no heartbeat dependency, restart recovery, preset ownership, blackout, live samples, old-settings migration, UI behavior and app-update rollback.
+Run `node --test test/*.test.mjs`. The suite exercises five mock WLED devices through actual HTTP, verifies independent RGB/effect state, microphone sender switching and rollback, zero DDP traffic, no heartbeat dependency, restart recovery, preset ownership, blackout, live samples, old-settings migration, UI behavior and app-update rollback. Real UDP packets additionally verify beat-only advances, silence/no-input hold, source-IP filtering, malformed and duplicate packet rejection, independent group wrapping, no preset writes, safe stop during an in-flight command, lost-stream recovery and explicit resume after restart.
 
 The browser API harness is not a Safari renderer. No physical tubes or real Mac Safari session were available here. Verify microphone response, LAN multicast delivery, real colors, controller firmware compatibility and viewport fit on the actual rig before relying on the show.
 

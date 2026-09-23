@@ -1,11 +1,12 @@
 import http from 'node:http';
+import dgram from 'node:dgram';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {LIMIT,updaterInfo,setSource,fetchUpdate,installBundle,rollback,atomicJSON,readJSON} from './updater.mjs';
-import {defaults,cleanConfig,effects,nativeEffect,payload,restorePayload,availablePresets,rgb} from './engine.mjs';
+import {defaults,cleanConfig,effects,nativeEffect,payload,restorePayload,availablePresets,rgb,isBeatLoop,BeatGate} from './engine.mjs';
 const ROOT=path.dirname(fileURLToPath(import.meta.url)),PACKAGE=readJSON(path.join(ROOT,'package.json'),{}),VERSION=PACKAGE.version;
 const PORT=Number(process.env.TUBEROOM_PORT||8788),DATA=process.env.TUBEROOM_DATA||path.join(os.homedir(),'Library','Application Support','TubeRoom');
 fs.mkdirSync(DATA,{recursive:true});
@@ -14,6 +15,10 @@ let config=cleanConfig(readJSON(path.join(DATA,'settings.json'),defaults()));
 let session=readJSON(path.join(DATA,'onboard-session.json'),{live:false,snapshots:{},presets:{},id:crypto.randomBytes(5).toString('hex')});
 const status={live:session.live,busy:false,error:'',devices:{},source:'tube',micReady:false,preview:{},previewErrors:{}};
 let pendingUpdate=null,restarting=false;
+const beatState=status.beat={listening:false,connected:false,events:0,lastPacketAt:0,lastBeatAt:0,indices:session.beatIndices||[0,0],error:'',deliveryErrors:[]};
+let beatSocket=null,beatTarget='',beatGate=new BeatGate(),beatJob=null,beatPending=null,beatEpoch=0;
+const needsBeats=(c=config)=>active(c).some(t=>isBeatLoop(c.groups[t.group]));
+
 const token=crypto.randomBytes(24).toString('hex');
 const save=()=>atomicJSON(path.join(DATA,'settings.json'),config),saveSession=()=>atomicJSON(path.join(DATA,'onboard-session.json'),session);
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
@@ -29,16 +34,71 @@ async function wled(ip,route='/json',data,timeout=3500){
 }
 function networks(){try{return Object.entries(os.networkInterfaces()).flatMap(([name,a])=>(a||[]).filter(x=>x.family==='IPv4'&&!x.internal&&privateIP(x.address)).map(x=>({name,ip:x.address,prefix:x.address.split('.').slice(0,3).join('.')})));}catch{return [];}}
 function active(c=config){return c.tubes.filter(t=>t.ip&&t.enabled);}
+function closeBeatReceiver(){beatEpoch++;beatPending=null;const socket=beatSocket;beatSocket=null;beatTarget='';beatState.listening=false;beatState.connected=false;if(socket)try{socket.close();}catch{}}
+function deliverBeat(){
+ // Count incoming peak events only while playing. There is no timer-driven advance.
+ if(!status.live||status.busy||!needsBeats())return;
+ const groups=new Set(active().filter(t=>isBeatLoop(config.groups[t.group])).map(t=>t.group));
+ for(const id of groups)beatState.indices[id]=(beatState.indices[id]+1)%config.groups[id].colors.length;
+ session.beatIndices=beatState.indices;
+ beatPending={epoch:beatEpoch,indices:[...beatState.indices]};
+ if(!beatJob){beatJob=pumpBeats().finally(()=>{beatJob=null;});}
+}
+async function pumpBeats(){
+ while(beatPending&&!status.busy&&status.live){
+  const next=beatPending;beatPending=null;if(next.epoch!==beatEpoch)break;
+  const targets=active().filter(t=>isBeatLoop(config.groups[t.group]));
+  const results=await Promise.allSettled(targets.map(t=>{
+   const g=config.groups[t.group],color=g.colors[next.indices[t.group]%g.colors.length];
+   return wled(t.ip,'/json/state',{transition:0,udpn:{nn:true},seg:[{id:0,col:[rgb(color),[0,0,0],[0,0,0]]}]},650);
+  }));
+  beatState.deliveryErrors=results.flatMap((r,i)=>r.status==='rejected'?[targets[i].name]:[]);
+ }
+}
+async function openBeatReceiver(){
+ const source=config.tubes[config.microphone],port=Number(status.devices[source.id]?.audioPort)||11988;
+ if(!Number.isInteger(port)||port<1||port>65535)throw Error('Invalid WLED audio sync port.');
+ const target=source.ip+':'+port;
+ if(beatSocket&&beatTarget===target&&beatState.listening)return;
+ closeBeatReceiver();beatState.error='';beatState.lastPacketAt=0;beatState.lastBeatAt=0;beatGate=new BeatGate();
+ const socket=dgram.createSocket({type:'udp4',reuseAddr:true});beatSocket=socket;beatTarget=target;
+ const epoch=beatEpoch;
+ socket.on('message',(packet,remote)=>{
+  if(epoch!==beatEpoch||remote.address!==source.ip)return;
+  const event=beatGate.accept(packet,performance.now());if(!event.valid)return;
+  beatState.lastPacketAt=Date.now();beatState.connected=true;
+  if(event.beat){beatState.events++;beatState.lastBeatAt=Date.now();deliverBeat();}
+ });
+ try{
+  await new Promise((resolve,reject)=>{
+   let bound=false;
+   socket.on('error',e=>{beatState.error='Beat listener: '+e.message;if(!bound)reject(e);else closeBeatReceiver();});
+   socket.bind(port,process.env.TUBEROOM_TEST==='1'?'127.0.0.1':'0.0.0.0',()=>{
+    try{
+     if(process.env.TUBEROOM_TEST!=='1'){
+      const addresses=networks().map(n=>n.ip);let joined=0;
+      for(const address of addresses)try{socket.addMembership('239.0.0.1',address);joined++;}catch{}
+      if(!joined)socket.addMembership('239.0.0.1');
+     }
+     bound=true;beatState.listening=true;resolve();
+    }catch(e){reject(e);}
+   });
+  });
+ }catch(e){closeBeatReceiver();throw Error('Could not listen to the tube microphone: '+e.message);}
+ // A silent room still produces packets. Do not silently substitute timer/demo beats.
+ for(let i=0;i<30&&!beatState.lastPacketAt;i++)await delay(100);
+ if(!beatState.lastPacketAt){closeBeatReceiver();beatState.error='No WLED Audio Sync v2 packets from '+source.name+'. Check Send mode, router multicast and macOS local-network access.';throw Error(beatState.error);}
+}
 async function probe(t){try{const j=await wled(t.ip);if(!Number.isInteger(j.info?.leds?.count)||!Array.isArray(j.effects))throw Error('This device did not return a WLED effect list.');
  const [cfg,meta]=await Promise.allSettled([wled(t.ip,'/json/cfg'),wled(t.ip,'/json/fxdata')]);
  const ar=cfg.status==='fulfilled'?cfg.value.um?.AudioReactive:null;
  return status.devices[t.id]={ok:true,ip:t.ip,name:String(j.info.name||t.name),version:j.info.ver,count:j.info.leds.count,effects:j.effects,palettes:j.palettes||[],fxdata:meta.status==='fulfilled'&&Array.isArray(meta.value)?meta.value:[],audio:!!ar,audioMode:ar?.sync?.mode,audioEnabled:ar?.enabled,audioPort:ar?.sync?.port,audioNote:ar?'':'AudioReactive configuration was not available. Open WLED to check support.',state:j.state};
  }catch(e){return status.devices[t.id]={ok:false,ip:t.ip,name:t.name,error:e.message};}}
 async function probeAll(){await Promise.all(config.tubes.filter(t=>t.ip).map(probe));const sender=config.tubes[config.microphone],d=status.devices[sender.id];status.micReady=!!(sender.ip&&sender.enabled&&d?.ok&&d.audioEnabled&&d.audioMode===1&&active().every(t=>{const x=status.devices[t.id];return x?.ok&&x.audioEnabled&&x.audioPort===d.audioPort&&x.audioMode===(t.id===sender.id?1:2);}));}
-async function locked(fn){if(status.busy)throw Error('A tube action is in progress. Try again shortly.');status.busy=true;status.error='';try{return await fn();}catch(e){status.error=e.message;throw e;}finally{status.busy=false;}}
+async function locked(fn){if(status.busy)throw Error('A tube action is in progress. Try again shortly.');status.busy=true;status.error='';beatPending=null;try{if(beatJob)await beatJob;return await fn();}catch(e){status.error=e.message;throw e;}finally{status.busy=false;}}
 async function snapshot(t){if(!session.snapshots[t.ip]){session.snapshots[t.ip]=await wled(t.ip,'/json/state');saveSession();}}
 async function cleanPresets(ip){const own=session.presets[ip]||[];if(!own.length)return;const p=await wled(ip,'/presets.json');for(const item of own){if(p[item.id]?.n===item.name)await wled(ip,'/json/state',{pdel:item.id});}delete session.presets[ip];saveSession();}
-async function restoreAll(off=false){const errors=[];for(const [ip,s]of Object.entries(session.snapshots)){try{await wled(ip,'/json/state',{...restorePayload(s),...(off?{on:false}:{})});await cleanPresets(ip);delete session.snapshots[ip];saveSession();}catch(e){errors.push(e.message);}}
+async function restoreAll(off=false){closeBeatReceiver();const errors=[];for(const [ip,s]of Object.entries(session.snapshots)){try{await wled(ip,'/json/state',{...restorePayload(s),...(off?{on:false}:{})});await cleanPresets(ip);delete session.snapshots[ip];saveSession();}catch(e){errors.push(e.message);}}
  session.live=false;status.live=false;saveSession();if(errors.length)throw Error('Some tubes could not be restored. Retry Stop: '+errors.join('; '));}
 async function stop(off=false){let problem;try{await restoreAll(off);}catch(e){problem=e;}
  if(off){const results=await Promise.allSettled(active().map(t=>wled(t.ip,'/json/state',{on:false,live:false,seg:[{id:0,fx:0}],udpn:{nn:true}})));const failed=results.flatMap((r,i)=>r.status==='rejected'?[active()[i].name]:[]);if(failed.length)throw Error('Blackout could not reach '+failed.join(', '));}
@@ -46,7 +106,7 @@ async function stop(off=false){let problem;try{await restoreAll(off);}catch(e){p
 }
 async function applyTube(t,c){const g=c.groups[t.group],d=status.devices[t.id],state=await wled(t.ip,'/json/state');const p=payload(g,t,d,state);
  await cleanPresets(t.ip);
- if(g.effect!=='loop'){await wled(t.ip,'/json/state',p);return;}
+ if(g.effect!=='loop'||isBeatLoop(g)){if(isBeatLoop(g))p.seg[0].col=[rgb(g.colors[0]),[0,0,0],[0,0,0]];await wled(t.ip,'/json/state',p);return;}
  const existing=await wled(t.ip,'/presets.json'),slots=availablePresets(existing,g.colors.length);
  session.presets[t.ip]=slots.map((id,i)=>({id,name:`TR ${session.id} ${i+1}`}));saveSession();
  for(let i=0;i<slots.length;i++){
@@ -59,8 +119,8 @@ async function applyTube(t,c){const g=c.groups[t.group],d=status.devices[t.id],s
  await wled(t.ip,'/json/state',{on:g.brightness>0,playlist:{ps:slots,dur:slots.map(()=>Math.round(g.seconds*10)),transition:slots.map(()=>Math.round(Math.min(g.fade,g.seconds)*10)),repeat:0,end:0},udpn:{nn:true}});
 }
 async function preflight(c){validate(c);if(!active(c).length)throw Error('Connect and enable at least one tube in Setup.');await probeAll();for(const t of active(c)){const d=status.devices[t.id];if(!d?.ok||d.ip!==t.ip)throw Error(`${t.name} is unreachable.`);if(d.count!==t.count)throw Error(`${t.name}: pixel count changed. Use Setup → Check & save.`);nativeEffect(c.groups[t.group],d);}
- if(active(c).some(t=>effects.find(e=>e.id===c.groups[t.group].effect).audio)&&!status.micReady)throw Error('Choose a tube microphone and click Connect microphone first. All enabled tubes need compatible AudioReactive support.');}
-async function start(){if(Object.keys(session.snapshots).length&&!status.live)throw Error('Click Stop & restore to finish restoring the previous session first.');await preflight(config);try{for(const t of active()){await snapshot(t);await applyTube(t,config);}session.live=true;status.live=true;saveSession();}catch(e){try{await restoreAll();}catch(r){throw Error(e.message+' '+r.message);}throw e;}}
+ if(active(c).some(t=>(effects.find(e=>e.id===c.groups[t.group].effect).audio||isBeatLoop(c.groups[t.group])))&&!status.micReady)throw Error('Choose a tube microphone and click Connect microphone first. All enabled tubes need compatible AudioReactive support.');}
+async function start(){if(Object.keys(session.snapshots).length&&!status.live)throw Error('Click Stop & restore to finish restoring the previous session first.');await preflight(config);try{if(needsBeats())await openBeatReceiver();for(const t of active()){await snapshot(t);await applyTube(t,config);}beatState.indices=[0,0];session.beatIndices=beatState.indices;session.live=true;status.live=true;saveSession();}catch(e){try{await restoreAll();}catch(r){throw Error(e.message+' '+r.message);}throw e;}}
 async function configureMic(){if(status.live)throw Error('Stop the lights before switching microphones.');const source=config.tubes[config.microphone];if(!source.ip||!source.enabled)throw Error('Choose a connected, enabled tube.');
  const entries=[];for(const t of config.tubes.filter(t=>t.ip)){const cfg=await wled(t.ip,'/json/cfg'),ar=cfg.um?.AudioReactive;if(!ar||!ar.sync){if(t.enabled)throw Error(`${t.name}: compatible AudioReactive settings were not found. Firmware will not be changed.`);continue;}entries.push({ip:t.ip,id:t.id,ar});}
  const sender=entries.find(x=>x.id===source.id);if(!sender)throw Error('The selected microphone is unavailable.');const port=Number(sender.ar.sync.port)||11988;
@@ -75,7 +135,7 @@ async function configureMic(){if(status.live)throw Error('Stop the lights before
  }catch(e){const failed=[];for(const old of changed){try{await wled(old.ip,'/json/cfg',{um:{AudioReactive:old.ar},sv:true});await wled(old.ip,'/json/state',{rb:true}).catch(()=>{});}catch{failed.push(old.ip);}}status.micReady=false;throw Error(e.message+(failed.length?' Could not roll back '+failed.join(', ')+'. Use Restore microphone settings when reachable.':' Previous microphone settings restored.'));}}
 async function restoreMic(){if(status.live)throw Error('Stop the lights first.');const file=path.join(DATA,'microphone-backup.json'),old=readJSON(file,{});for(const [ip,ar]of Object.entries(old)){await wled(ip,'/json/cfg',{um:{AudioReactive:ar},sv:true});await wled(ip,'/json/state',{rb:true}).catch(()=>{});delete old[ip];atomicJSON(file,old);}status.micReady=false;}
 async function scan(prefix){if(!privateIP(prefix+'.1'))throw Error('Enter a local subnet such as 192.168.1.');let n=1;const found=[];await Promise.all(Array.from({length:16},async()=>{while(n<255){const ip=prefix+'.'+n++;try{const info=await wled(ip,'/json/info',undefined,500);if(info.leds?.count)found.push({ip,name:info.name,count:info.leds.count});}catch{}}}));return found;}
-function state(){return {config,status,effects,networks:networks(),version:VERSION,pid:process.pid,needsRestore:!!Object.keys(session.snapshots).length};}
+function state(){beatState.connected=beatState.listening&&Date.now()-beatState.lastPacketAt<2500;return {config,status,effects,networks:networks(),version:VERSION,pid:process.pid,needsRestore:!!Object.keys(session.snapshots).length};}
 function reply(res,code,j){res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(j));}
 async function body(req,limit=64000){let s='';for await(const chunk of req){s+=chunk;if(Buffer.byteLength(s)>limit)throw Error('Request too large');}return s?JSON.parse(s):{};}
 const server=http.createServer(async(req,res)=>{
@@ -88,8 +148,9 @@ const server=http.createServer(async(req,res)=>{
    const b=await body(req,url.pathname==='/api/update/install'?LIMIT+1024:64000);
    if(restarting)throw Error('TubeRoom is restarting.');let result={};
    switch(url.pathname){
-    case '/api/config':result=await locked(async()=>{const next=cleanConfig(b,config);validate(next);if(status.live&&(b.tubes||'microphone'in b))throw Error('Stop the lights before changing tube assignments or microphone.');if(status.live){await preflight(next);try{for(const t of active(next))if(JSON.stringify(next.groups[t.group])!==JSON.stringify(config.groups[t.group]))await applyTube(t,next);}catch(e){await restoreAll().catch(r=>{e.message+=' '+r.message;});throw e;}}if(next.microphone!==config.microphone||b.tubes)status.micReady=false;config=next;save();return {config,status};});break;
+    case '/api/config':result=await locked(async()=>{const next=cleanConfig(b,config);validate(next);if(status.live&&(b.tubes||'microphone'in b))throw Error('Stop the lights before changing tube assignments or microphone.');if(status.live){await preflight(next);try{if(needsBeats(next))await openBeatReceiver();else closeBeatReceiver();for(const t of active(next))if(JSON.stringify(next.groups[t.group])!==JSON.stringify(config.groups[t.group]))await applyTube(t,next);}catch(e){await restoreAll().catch(r=>{e.message+=' '+r.message;});throw e;}}for(let i=0;i<2;i++)if(JSON.stringify(next.groups[i])!==JSON.stringify(config.groups[i]))beatState.indices[i]=0;session.beatIndices=beatState.indices;if(next.microphone!==config.microphone||b.tubes)status.micReady=false;config=next;save();return {config,status};});break;
     case '/api/probe':await locked(probeAll);result=state();break;
+    case '/api/beat/resume':await locked(async()=>{if(!status.live||!needsBeats())throw Error('Start a beat color loop first.');await preflight(config);await openBeatReceiver();});result=state();break;
     case '/api/start':await locked(start);result=state();break;
     case '/api/stop':await locked(()=>stop(false));result=state();break;
     case '/api/blackout':await locked(()=>stop(true));result=state();break;
@@ -111,5 +172,5 @@ const server=http.createServer(async(req,res)=>{
   res.writeHead(200,{'Content-Type':file.endsWith('.css')?'text/css':file.endsWith('.js')?'text/javascript':'text/html','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'"});fs.createReadStream(path.join(ROOT,'public',file)).pipe(res);
  }catch(e){if(!res.headersSent)reply(res,400,{error:e.message});else res.end();}
 });
-server.on('error',e=>{console.error(e.message);process.exit(1);});server.listen(PORT,'127.0.0.1',()=>console.log(`TubeRoom: http://127.0.0.1:${PORT}\nLights run on WLED. Closing this app leaves them running.`));
-function shutdown(code=0){save();saveSession();server.close();process.exit(code);}process.on('SIGINT',()=>shutdown());process.on('SIGTERM',()=>shutdown());
+server.on('error',e=>{console.error(e.message);process.exit(1);});server.listen(PORT,'127.0.0.1',()=>console.log(`TubeRoom: http://127.0.0.1:${PORT}\nOnboard effects continue when this app closes. Beat color loops require this process and an awake Mac.`));
+function shutdown(code=0){closeBeatReceiver();session.beatIndices=beatState.indices;save();saveSession();server.close();process.exit(code);}process.on('SIGINT',()=>shutdown());process.on('SIGTERM',()=>shutdown());
