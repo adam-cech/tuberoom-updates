@@ -1,6 +1,6 @@
 {
   "name": "tube-room",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "private": true,
   "type": "module",
   "description": "Five-tube controller using stock WLED onboard effects and microphones.",

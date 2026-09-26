@@ -1,6 +1,6 @@
-TubeRoom 1.2.1 — 2026-09-23
+TubeRoom 1.2.2 — 2026-09-26
 
-9 automated tests passed with node --test test/*.test.mjs:
+11 automated tests passed with node --test test/*.test.mjs:
 - UI: two groups, RGB edits, tube mic selection, layout, no WebAudio.
 - Version 1 settings migration preserves connections, layout and colors.
 - Firmware effect-name discovery, RGB payloads, full-strip bounds, group isolation.
@@ -12,6 +12,11 @@ TubeRoom 1.2.1 — 2026-09-23
 - Real UDP Audio Sync v2: beat-only color advances, source filtering, malformed
   and duplicate trigger rejection, silence and lost-stream hold, group wrapping,
   no beat-mode preset writes, Stop drains in-flight writes, restart/resume.
+- Bass filtering: weak hits/treble rejection, sustained bass and cooldown,
+  rearming after release, reconnect warmup, config migration and validation.
+- HTTP/UDP integration: independent bass thresholds, one hit per onset,
+  peak flags ignored in bass mode, live tuning preserves color indices.
+- UI: bass tuning dialog and per-group threshold/gap persistence.
 - Corrupt, incomplete, malicious and downgrade app-update rejection.
 - App update restart, failed-start recovery and rollback preserve settings.
 - Feed checking validates downloads; offline failure leaves installation intact.

@@ -6,7 +6,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import {LIMIT,updaterInfo,setSource,fetchUpdate,installBundle,rollback,atomicJSON,readJSON} from './updater.mjs';
-import {defaults,cleanConfig,effects,nativeEffect,payload,restorePayload,availablePresets,rgb,isBeatLoop,BeatGate} from './engine.mjs';
+import {defaults,cleanConfig,effects,nativeEffect,payload,restorePayload,availablePresets,rgb,isBeatLoop,BeatGate,BassGate,decodeAudioSync} from './engine.mjs';
 const ROOT=path.dirname(fileURLToPath(import.meta.url)),PACKAGE=readJSON(path.join(ROOT,'package.json'),{}),VERSION=PACKAGE.version;
 const PORT=Number(process.env.TUBEROOM_PORT||8788),DATA=process.env.TUBEROOM_DATA||path.join(os.homedir(),'Library','Application Support','TubeRoom');
 fs.mkdirSync(DATA,{recursive:true});
@@ -15,8 +15,10 @@ let config=cleanConfig(readJSON(path.join(DATA,'settings.json'),defaults()));
 let session=readJSON(path.join(DATA,'onboard-session.json'),{live:false,snapshots:{},presets:{},id:crypto.randomBytes(5).toString('hex')});
 const status={live:session.live,busy:false,error:'',devices:{},source:'tube',micReady:false,preview:{},previewErrors:{}};
 let pendingUpdate=null,restarting=false;
-const beatState=status.beat={listening:false,connected:false,events:0,lastPacketAt:0,lastBeatAt:0,indices:session.beatIndices||[0,0],error:'',deliveryErrors:[]};
+const beatState=status.beat={listening:false,connected:false,events:0,lastPacketAt:0,lastBeatAt:0,indices:session.beatIndices||[0,0],error:'',deliveryErrors:[],accepted:[0,0],bass:[{},{}]};
 let beatSocket=null,beatTarget='',beatGate=new BeatGate(),beatJob=null,beatPending=null,beatEpoch=0;
+let bassGates=[new BassGate(),new BassGate()];
+const lightingKey=g=>JSON.stringify({...g,bassThreshold:undefined,bassGap:undefined});
 const needsBeats=(c=config)=>active(c).some(t=>isBeatLoop(c.groups[t.group]));
 
 const token=crypto.randomBytes(24).toString('hex');
@@ -35,19 +37,19 @@ async function wled(ip,route='/json',data,timeout=3500){
 function networks(){try{return Object.entries(os.networkInterfaces()).flatMap(([name,a])=>(a||[]).filter(x=>x.family==='IPv4'&&!x.internal&&privateIP(x.address)).map(x=>({name,ip:x.address,prefix:x.address.split('.').slice(0,3).join('.')})));}catch{return [];}}
 function active(c=config){return c.tubes.filter(t=>t.ip&&t.enabled);}
 function closeBeatReceiver(){beatEpoch++;beatPending=null;const socket=beatSocket;beatSocket=null;beatTarget='';beatState.listening=false;beatState.connected=false;if(socket)try{socket.close();}catch{}}
-function deliverBeat(){
+function deliverBeat(groups){
  // Count incoming peak events only while playing. There is no timer-driven advance.
  if(!status.live||status.busy||!needsBeats())return;
- const groups=new Set(active().filter(t=>isBeatLoop(config.groups[t.group])).map(t=>t.group));
- for(const id of groups)beatState.indices[id]=(beatState.indices[id]+1)%config.groups[id].colors.length;
+ if(!groups.size)return;
+ for(const id of groups){beatState.indices[id]=(beatState.indices[id]+1)%config.groups[id].colors.length;beatState.accepted[id]++;}
  session.beatIndices=beatState.indices;
- beatPending={epoch:beatEpoch,indices:[...beatState.indices]};
+ beatPending={epoch:beatEpoch,indices:[...beatState.indices],groups:new Set([...(beatPending?.groups||[]),...groups])};
  if(!beatJob){beatJob=pumpBeats().finally(()=>{beatJob=null;});}
 }
 async function pumpBeats(){
  while(beatPending&&!status.busy&&status.live){
   const next=beatPending;beatPending=null;if(next.epoch!==beatEpoch)break;
-  const targets=active().filter(t=>isBeatLoop(config.groups[t.group]));
+  const targets=active().filter(t=>next.groups.has(t.group)&&isBeatLoop(config.groups[t.group]));
   const results=await Promise.allSettled(targets.map(t=>{
    const g=config.groups[t.group],color=g.colors[next.indices[t.group]%g.colors.length];
    return wled(t.ip,'/json/state',{transition:0,udpn:{nn:true},seg:[{id:0,col:[rgb(color),[0,0,0],[0,0,0]]}]},650);
@@ -60,14 +62,17 @@ async function openBeatReceiver(){
  if(!Number.isInteger(port)||port<1||port>65535)throw Error('Invalid WLED audio sync port.');
  const target=source.ip+':'+port;
  if(beatSocket&&beatTarget===target&&beatState.listening)return;
- closeBeatReceiver();beatState.error='';beatState.lastPacketAt=0;beatState.lastBeatAt=0;beatGate=new BeatGate();
+ closeBeatReceiver();beatState.error='';beatState.lastPacketAt=0;beatState.lastBeatAt=0;beatGate=new BeatGate();bassGates=[new BassGate(),new BassGate()];beatState.bass=[{},{}];
  const socket=dgram.createSocket({type:'udp4',reuseAddr:true});beatSocket=socket;beatTarget=target;
  const epoch=beatEpoch;
  socket.on('message',(packet,remote)=>{
   if(epoch!==beatEpoch||remote.address!==source.ip)return;
-  const event=beatGate.accept(packet,performance.now());if(!event.valid)return;
+  const now=performance.now(),event=beatGate.accept(packet,now);if(!event.valid)return;
+  const audio=decodeAudioSync(packet),triggered=new Set();
+  const groups=new Set(active().filter(t=>isBeatLoop(config.groups[t.group])).map(t=>t.group));
+  for(const id of groups){const g=config.groups[id];if(g.loopTrigger==='bass'){const result=bassGates[id].accept(audio.bands,now,g);beatState.bass[id]=result;if(result.hit)triggered.add(id);}else if(event.beat)triggered.add(id);}
   beatState.lastPacketAt=Date.now();beatState.connected=true;
-  if(event.beat){beatState.events++;beatState.lastBeatAt=Date.now();deliverBeat();}
+  if(event.beat)beatState.events++;if(triggered.size){beatState.lastBeatAt=Date.now();deliverBeat(triggered);}
  });
  try{
   await new Promise((resolve,reject)=>{
@@ -120,7 +125,7 @@ async function applyTube(t,c){const g=c.groups[t.group],d=status.devices[t.id],s
 }
 async function preflight(c){validate(c);if(!active(c).length)throw Error('Connect and enable at least one tube in Setup.');await probeAll();for(const t of active(c)){const d=status.devices[t.id];if(!d?.ok||d.ip!==t.ip)throw Error(`${t.name} is unreachable.`);if(d.count!==t.count)throw Error(`${t.name}: pixel count changed. Use Setup → Check & save.`);nativeEffect(c.groups[t.group],d);}
  if(active(c).some(t=>(effects.find(e=>e.id===c.groups[t.group].effect).audio||isBeatLoop(c.groups[t.group])))&&!status.micReady)throw Error('Choose a tube microphone and click Connect microphone first. All enabled tubes need compatible AudioReactive support.');}
-async function start(){if(Object.keys(session.snapshots).length&&!status.live)throw Error('Click Stop & restore to finish restoring the previous session first.');await preflight(config);try{if(needsBeats())await openBeatReceiver();for(const t of active()){await snapshot(t);await applyTube(t,config);}beatState.indices=[0,0];session.beatIndices=beatState.indices;session.live=true;status.live=true;saveSession();}catch(e){try{await restoreAll();}catch(r){throw Error(e.message+' '+r.message);}throw e;}}
+async function start(){if(Object.keys(session.snapshots).length&&!status.live)throw Error('Click Stop & restore to finish restoring the previous session first.');await preflight(config);try{if(needsBeats())await openBeatReceiver();for(const t of active()){await snapshot(t);await applyTube(t,config);}beatState.indices=[0,0];beatState.accepted=[0,0];session.beatIndices=beatState.indices;session.live=true;status.live=true;saveSession();}catch(e){try{await restoreAll();}catch(r){throw Error(e.message+' '+r.message);}throw e;}}
 async function configureMic(){if(status.live)throw Error('Stop the lights before switching microphones.');const source=config.tubes[config.microphone];if(!source.ip||!source.enabled)throw Error('Choose a connected, enabled tube.');
  const entries=[];for(const t of config.tubes.filter(t=>t.ip)){const cfg=await wled(t.ip,'/json/cfg'),ar=cfg.um?.AudioReactive;if(!ar||!ar.sync){if(t.enabled)throw Error(`${t.name}: compatible AudioReactive settings were not found. Firmware will not be changed.`);continue;}entries.push({ip:t.ip,id:t.id,ar});}
  const sender=entries.find(x=>x.id===source.id);if(!sender)throw Error('The selected microphone is unavailable.');const port=Number(sender.ar.sync.port)||11988;
@@ -148,7 +153,7 @@ const server=http.createServer(async(req,res)=>{
    const b=await body(req,url.pathname==='/api/update/install'?LIMIT+1024:64000);
    if(restarting)throw Error('TubeRoom is restarting.');let result={};
    switch(url.pathname){
-    case '/api/config':result=await locked(async()=>{const next=cleanConfig(b,config);validate(next);if(status.live&&(b.tubes||'microphone'in b))throw Error('Stop the lights before changing tube assignments or microphone.');if(status.live){await preflight(next);try{if(needsBeats(next))await openBeatReceiver();else closeBeatReceiver();for(const t of active(next))if(JSON.stringify(next.groups[t.group])!==JSON.stringify(config.groups[t.group]))await applyTube(t,next);}catch(e){await restoreAll().catch(r=>{e.message+=' '+r.message;});throw e;}}for(let i=0;i<2;i++)if(JSON.stringify(next.groups[i])!==JSON.stringify(config.groups[i]))beatState.indices[i]=0;session.beatIndices=beatState.indices;if(next.microphone!==config.microphone||b.tubes)status.micReady=false;config=next;save();return {config,status};});break;
+    case '/api/config':result=await locked(async()=>{const next=cleanConfig(b,config);validate(next);if(status.live&&(b.tubes||'microphone'in b))throw Error('Stop the lights before changing tube assignments or microphone.');if(status.live){await preflight(next);try{if(needsBeats(next))await openBeatReceiver();else closeBeatReceiver();for(const t of active(next))if(lightingKey(next.groups[t.group])!==lightingKey(config.groups[t.group]))await applyTube(t,next);}catch(e){await restoreAll().catch(r=>{e.message+=' '+r.message;});throw e;}}for(let i=0;i<2;i++)if(lightingKey(next.groups[i])!==lightingKey(config.groups[i])){beatState.indices[i]=0;bassGates[i]=new BassGate();}session.beatIndices=beatState.indices;if(next.microphone!==config.microphone||b.tubes)status.micReady=false;config=next;save();return {config,status};});break;
     case '/api/probe':await locked(probeAll);result=state();break;
     case '/api/beat/resume':await locked(async()=>{if(!status.live||!needsBeats())throw Error('Start a beat color loop first.');await preflight(config);await openBeatReceiver();});result=state();break;
     case '/api/start':await locked(start);result=state();break;

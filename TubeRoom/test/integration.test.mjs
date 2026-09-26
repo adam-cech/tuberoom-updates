@@ -58,5 +58,22 @@ test('stock WLED groups, mic routing rollback, preset ownership, no DDP, restart
  slowBeatWrites=true;await send(packet(true));await delay(15);assert.equal((await post('stop')).code,200);const stopWrites=calls.length;await send(packet(true));await delay(250);assert.equal(calls.length,stopWrites);assert.equal(devices['127.0.0.1'].state.on,false);slowBeatWrites=false;
  // Both groups and the beat listener survive normal app use; reopening needs explicit resume.
  result=await post('start');assert.equal(result.code,200,JSON.stringify(result));await close();launch();s=await ready();assert.equal(s.status.live,true);assert.equal(s.status.beat.listening,false);assert.equal((await post('beat/resume')).code,200);await send(packet(true));await delay(60);assert.deepEqual(color('127.0.0.1'),[0,255,0]);await post('stop');
+ // Bass filtering uses FFT bands independently per group, without requiring a peak flag.
+ clearInterval(streamTimer);
+ const bassPacket=(level,high=0,peak=false)=>{const b=packet(peak);b.fill(Math.round(level*2.55),18,21);b.fill(high,21,34);return b;};
+ let bassLevel=10,highLevel=0,peakFlag=false;
+ streamTimer=setInterval(()=>send(bassPacket(bassLevel,highLevel,peakFlag)).catch(()=>{}),25);
+ s=await get();for(const g of s.config.groups){g.loopTrigger='bass';g.bassGap=650;}s.config.groups[0].bassThreshold=55;s.config.groups[1].bassThreshold=80;
+ assert.equal((await post('config',{groups:s.config.groups})).code,200);assert.equal((await post('start')).code,200);await delay(350);
+ bassLevel=65;await delay(120);
+ assert.deepEqual(color('127.0.0.1'),[0,255,0]);assert.deepEqual(color('127.0.0.4'),[255,255,0],'group B rejects a hit below its own threshold');
+ const held=calls.length;await delay(800);assert.equal(calls.length,held,'sustained bass does not advance when cooldown expires');
+ bassLevel=10;await delay(800);bassLevel=95;await delay(120);
+ assert.deepEqual(color('127.0.0.1'),[0,0,255]);assert.deepEqual(color('127.0.0.4'),[255,0,255]);
+ assert.deepEqual((await get()).status.beat.accepted,[2,1]);
+ bassLevel=10;await delay(800);s=await get();s.config.groups[0].bassThreshold=90;
+ const tuning=calls.length;assert.equal((await post('config',{groups:s.config.groups})).code,200);assert.equal(calls.length,tuning,'tuning the threshold does not repaint/reset the loop');assert.deepEqual((await get()).status.beat.indices,[2,1]);
+ highLevel=255;peakFlag=true;await delay(750);assert.equal(calls.length,tuning,'treble and WLED general peak flags cannot trigger bass mode');
+ assert.equal((await post('stop')).code,200);
  clearInterval(streamTimer);assert.equal((await post('microphone/restore')).code,200);assert.equal(devices['127.0.0.4'].ar.sync.mode,0);
 });

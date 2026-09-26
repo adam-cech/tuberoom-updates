@@ -11,3 +11,18 @@ test('Audio Sync v2 peak flags only, malformed packets rejected and duplicate tr
  const c=defaults();c.groups[0].effect='loop';assert.equal(isBeatLoop(c.groups[0]),true);delete c.groups[0].loopTrigger;
  assert.equal(cleanConfig(c).groups[0].loopTrigger,'time','old timed setups retain their behavior');
 });
+
+test('bass filter ignores small peaks and treble; strong bass triggers once, then rearms after release',async()=>{
+ const {BassGate}=await import('../engine.mjs');const gate=new BassGate();let time=0;
+ const feed=(bass,frames=1,options={},high=0)=>{let hits=0,last;for(let i=0;i<frames;i++){time+=20;last=gate.accept([...Array(3).fill(Math.round(bass*2.55)),...Array(13).fill(high)],time,options);hits+=Number(last.hit);}return {hits,last};};
+ assert.equal(feed(10,20).hits,0);assert.equal(feed(10,20,{},255).hits,0,'treble alone does not trigger');
+ for(let n=0;n<6;n++){assert.equal(feed(35,2).hits,0);feed(10,25);}
+ assert.equal(feed(90).hits,1,'large bass onset triggers');assert.equal(feed(90,100).hits,0,'sustained bass does not retrigger after cooldown');
+ feed(10,35);assert.equal(feed(90).hits,1,'fresh large hit after release');feed(10,10);assert.equal(feed(90).hits,0,'cooldown rejects a closely spaced hit');assert.equal(feed(90,60).hits,0,'rejected onset cannot become a delayed timer trigger');
+ feed(10,40);assert.equal(feed(65,1,{bassThreshold:75}).hits,0,'higher threshold rejects medium hits');feed(10,40);assert.equal(feed(90,1,{bassThreshold:75}).hits,1);
+ time+=2000;assert.equal(feed(95).hits,0,'reconnection cannot invent an onset');
+});
+test('bass defaults/migration and trigger settings validation preserve explicit choices',()=>{
+ const old=defaults();old.groups[0].loopTrigger='beat';const migrated=cleanConfig(old);assert.equal(migrated.groups[0].loopTrigger,'bass');assert.equal(migrated.groups[0].bassThreshold,55);assert.equal(migrated.groups[0].bassGap,650);
+ migrated.groups[0].loopTrigger='beat';migrated.groups[0].bassGap=-100;migrated.groups[0].bassThreshold=200;const clean=cleanConfig(migrated);assert.equal(clean.groups[0].loopTrigger,'beat');assert.equal(clean.groups[0].bassThreshold,95);assert.equal(clean.groups[0].bassGap,200);
+});
