@@ -1,3 +1,12 @@
+TubeRoom 1.2.3 — 2026-09-26
+
+UI-only update: browser API harness passed after adding the main-screen
+sensitivity slider. Verified inverse threshold mapping at both ends,
+per-group persistence and hiding in timer mode. App JavaScript syntax
+check passed. The update builder validates the seven-file package.
+No physical hardware or Safari rendering test was available.
+
+Previous release validation (unchanged engine/server):
 TubeRoom 1.2.2 — 2026-09-26
 
 11 automated tests passed with node --test test/*.test.mjs:

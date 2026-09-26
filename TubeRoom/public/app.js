@@ -18,7 +18,7 @@ function populate(){const g=current(),e=effect();for(const b of $('groupTabs').c
  for(const id of ['brightness','speed','intensity']){$(id).value=id==='brightness'?Math.round(g[id]*100):g[id];setText(id+'Value',id==='brightness'?Math.round(g[id]*100)+'%':String(g[id]));}
  const d=groupDevices()[0],fx=d?.effects.findIndex(n=>e.native.includes(n)),meta=d?.fxdata[fx]?.split(';')[0]?.split(',')||[];
  setText('speedLabel',meta[0]&&meta[0]!=='!'?meta[0]:'Speed');setText('intensityLabel',meta[1]&&meta[1]!=='!'?meta[1]:'Intensity');
- $('speed').disabled=['fixed','loop'].includes(g.effect);$('speedControl').hidden=g.effect==='loop';$('intensityControl').hidden=!['scroll','plasmoid','flashes','ripples','center'].includes(g.effect);$('loopControls').hidden=g.effect!=='loop';$('loopTrigger').value=g.loopTrigger;$('timedLoopControls').hidden=g.loopTrigger!=='time';$('beatLoopControls').hidden=g.loopTrigger==='time';$('bassTuneBtn').hidden=g.loopTrigger!=='bass';$('seconds').value=g.seconds;$('fade').value=g.fade;$('audioControlsBtn').hidden=!e.audio;
+ $('speed').disabled=['fixed','loop'].includes(g.effect);$('speedControl').hidden=g.effect==='loop';$('intensityControl').hidden=!['scroll','plasmoid','flashes','ripples','center'].includes(g.effect);$('loopControls').hidden=g.effect!=='loop';$('loopTrigger').value=g.loopTrigger;$('timedLoopControls').hidden=g.loopTrigger!=='time';$('beatLoopControls').hidden=g.loopTrigger==='time';$('bassTuneBtn').hidden=g.loopTrigger!=='bass';$('bassSensitivityControl').hidden=g.loopTrigger!=='bass';sensitivityLabel();$('seconds').value=g.seconds;$('fade').value=g.fade;$('audioControlsBtn').hidden=!e.audio;
  $('colors').replaceChildren();const count=g.effect==='loop'?g.colors.length:Math.min(e.colors,g.colors.length);for(let i=0;i<count;i++){const b=document.createElement('button');b.style.background=g.colors[i];b.textContent=i+1;b.title='Edit color '+(i+1);b.setAttribute('aria-label',`Color ${i+1}: ${g.colors[i]}`);b.onclick=()=>openColor(i);$('colors').append(b);}
  $('addColor').hidden=e.colors===0||count>=e.colors;setText('colorHelp',e.colors===0?'This effect generates its own colors.':g.effect==='loop'?(isBeat(g)?(g.loopTrigger==='bass'?'Your order · stronger bass hits only.':'Your order · one color per tube peak.'):'Your order · timed sequence on WLED.'):e.audio?'Up to three palette colors; no ordered beat loop.':'Click a swatch to open the RGB wheel.');
  $('microphone').value=config.microphone;cards();renderBeatStatus();draw();}
@@ -40,7 +40,9 @@ function renderBeatStatus(){
  setText('beatStatus',text);
 }
 
-function bassLabels(){setText('bassThresholdValue',Math.round(current().bassThreshold)+'%');setText('bassGapValue',(current().bassGap/1000).toFixed(2)+' s');$('bassThresholdMarker').style.left=current().bassThreshold+'%';}
+function sensitivityLabel(){const value=Math.round((95-current().bassThreshold)/.85);$('bassSensitivity').value=value;setText('bassSensitivityValue',value+'%');}
+$('bassSensitivity').oninput=()=>{current().bassThreshold=Number((95-clamp($('bassSensitivity').value,0,100)*.85).toFixed(2));mark();sensitivityLabel();renderBeatStatus();};
+function bassLabels(){sensitivityLabel();setText('bassThresholdValue',Math.round(current().bassThreshold)+'%');setText('bassGapValue',(current().bassGap/1000).toFixed(2)+' s');$('bassThresholdMarker').style.left=current().bassThreshold+'%';}
 function renderBassMeter(){
  if(!config)return;const m=status.beat?.bass?.[group],fresh=status.beat?.connected&&current().loopTrigger==='bass';
  const value=fresh?Math.round(m?.peakLevel||0):0;$('bassMeterFill').style.width=value+'%';$('bassMeter').setAttribute('aria-valuenow',String(value));

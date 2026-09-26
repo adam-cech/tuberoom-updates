@@ -1,4 +1,4 @@
-# TubeRoom 1.2.2 — stock WLED edition
+# TubeRoom 1.2.3 — stock WLED edition
 
 A local Mac controller for five WLED tubes. WLED performs audio analysis and renders the lights. For the optional beat color loop, the Mac filters the selected tube’s reported bass levels (or peak flags) and sends each color change; other effects run autonomously on WLED. No firmware is installed, patched or replaced. No npm dependencies.
 
@@ -39,7 +39,7 @@ Beat color sequences are supported through the optional Mac relay. Exact synchro
 
 ## Bass-triggered color loop
 
-Choose a group → Color loop → Big bass hits → Tune bass trigger. Set and reorder the colors, connect your chosen tube microphone, then Start lights (or Apply groups if already running). New color loops and saved 1.2.1 beat loops default to bass mode. Saved timed loops keep their timer. Every tube peak restores the original behavior.
+Choose a group → Color loop → Big bass hits → Sensitivity. Move left for fewer, stronger hits; right for more reactions. Click Apply groups while running (Save settings while stopped). More bass controls opens threshold, minimum-gap and meter settings. Set and reorder the colors, connect your chosen tube microphone, then Start lights (or Apply groups if already running). New color loops and saved 1.2.1 beat loops default to bass mode. Saved timed loops keep their timer. Every tube peak restores the original behavior.
 
 The default Big hits preset uses a 55% threshold and a 0.65-second minimum gap. If it still changes too often, try Only the biggest (75%, 1 second). More hits uses 35% and 0.3 seconds. Each group has independent settings. The recent bass peak meter helps with tuning; percentages are relative to WLED’s reported levels, not decibels. Mic placement, gain and WLED automatic gain control affect them. Apply bass settings saves changes without restarting the current color sequence.
 

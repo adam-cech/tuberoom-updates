@@ -8,3 +8,5 @@
 #loopTrigger{font-size:11px;padding:5px}#beatStatus{color:var(--sky)}#resumeBeats{font-size:10px;padding:5px 8px}#beatLoopControls .microcopy{margin:5px 0}
 
 .bass-meter{height:18px;background:#07131d;position:relative;border:1px solid var(--line);border-radius:5px;overflow:hidden}.bass-meter i{display:block;background:var(--sky);height:100%;width:0;transition:width .15s}.bass-meter b{position:absolute;top:0;bottom:0;width:3px;background:#fff;left:55%}#bassTune{width:min(570px,94vw)}#bassTune output{float:right;color:var(--sky)}#bassTune input[type=range]{display:block;margin-top:8px}
+
+#loopControls #bassSensitivity{width:100%;padding:0;display:block;margin:0;height:18px}.sensitivity-ends{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:2px}#bassSensitivityControl{margin-top:5px}#bassSensitivityControl label{margin-bottom:1px}
