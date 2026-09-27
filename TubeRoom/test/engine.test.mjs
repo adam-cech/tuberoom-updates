@@ -1,28 +1,15 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {defaults,cleanConfig,effects,payload,availablePresets,nativeEffect,BeatGate,decodeAudioSync,isBeatLoop} from '../engine.mjs';
-test('version 1 settings migrate with connections, layout and RGB colors preserved',()=>{const old={version:1,brightness:.43,colorA:'#123456',colorB:'#abcdef',tubes:defaults().tubes};old.tubes[0].ip='192.168.1.20';old.tubes[0].angle=55;const c=cleanConfig(old);assert.equal(c.groups[0].brightness,.43);assert.equal(c.groups[1].colors[0],'#123456');assert.equal(c.tubes[0].angle,55);assert.deepEqual(c.tubes.map(t=>t.group),[0,0,0,1,1]);assert.equal(c.groups[0].effect,'fixed');});
-test('effect IDs come from actual firmware; groups send RGB, full bounds and no normal UDP sync',()=>{const c=defaults(),d={name:'test',effects:['Breathe','Solid'],palettes:[],audio:false};c.groups[0].colors=['#ff0000'];const p=payload(c.groups[0],c.tubes[0],d,{seg:[{id:0},{id:1}]});assert.equal(p.seg[0].fx,1);assert.deepEqual(p.seg[0].col[0],[255,0,0]);assert.equal(p.seg[0].stop,100);assert.equal(p.seg[1].stop,0);assert.equal(p.udpn.rgrp,0);assert.throws(()=>nativeEffect({...c.groups[0],effect:'ripples'},d),/not installed/);assert.throws(()=>nativeEffect({...c.groups[0],effect:'ripples'},{...d,effects:['Ripple Peak']}),/AudioReactive/);});
-test('color loop uses only free slots; validation rejects invalid data',()=>{assert.deepEqual(availablePresets({'200':{n:'user'}},3),[201,202,203]);assert.throws(()=>availablePresets(Object.fromEntries(Array.from({length:51},(_,i)=>[i+200,{}])),1),/Not enough/);const c=defaults();c.groups[0].colors=['red'];assert.throws(()=>cleanConfig(c),/RGB/);assert.equal(effects.length,12);});
-
-test('Audio Sync v2 peak flags only, malformed packets rejected and duplicate triggers suppressed',()=>{
- const b=Buffer.alloc(44);b.write('00002\0');const gate=new BeatGate();
- assert.deepEqual(gate.accept(b,0),{valid:true,beat:false});b[16]=1;
- assert.equal(gate.accept(b,10).beat,true);assert.equal(gate.accept(b,30).beat,false);assert.equal(gate.accept(b,195).beat,true);
- assert.equal(decodeAudioSync(Buffer.alloc(44)),null);assert.equal(decodeAudioSync(b.subarray(0,43)),null);assert.equal(decodeAudioSync(Buffer.concat([b,Buffer.alloc(1)])),null);
- const c=defaults();c.groups[0].effect='loop';assert.equal(isBeatLoop(c.groups[0]),true);delete c.groups[0].loopTrigger;
- assert.equal(cleanConfig(c).groups[0].loopTrigger,'time','old timed setups retain their behavior');
+import test from 'node:test';import assert from 'node:assert/strict';
+import {defaults,cleanConfig,privateIP,selected,payload,catalog,captureScene,scenePayload} from '../engine.mjs';
+const device=(flip=false)=>({ok:true,name:'Bar',ip:'192.168.1.10',effects:flip?['Breathe','Solid']:['Solid','Breathe'],palettes:flip?['Ocean','Default']:['Default','Ocean'],state:{on:true,bri:100,transition:7,mainseg:1,seg:[{id:0,start:0,stop:50,fx:0,pal:0,col:[[0,255,0],[0,0,0],[0,0,0]]},{id:1,start:50,stop:100,fx:1,pal:1,col:[[255,0,0],[0,0,255],[0,0,0]],rev:true}]}});
+test('v3 imports five existing connections and groups without accepting public addresses or duplicate IPs',()=>{
+ const old={...defaults(),version:2};old.tubes[0]={...old.tubes[0],name:'Left bar',ip:'192.168.1.10',x:220};const c=cleanConfig(old);assert.equal(c.version,3);assert.equal(c.tubes[0].name,'Left bar');assert.equal(c.tubes[0].group,0);assert.equal(old.version,2);assert.equal(privateIP('172.32.1.2'),false);assert.equal(privateIP('10.0.0.2'),true);
+ assert.throws(()=>cleanConfig({...c,tubes:c.tubes.map(t=>({...t,ip:'8.8.8.8'}))}),/local IPv4/);assert.throws(()=>cleanConfig({...c,tubes:c.tubes.map(t=>({...t,ip:'192.168.1.10'}))}),/different IP/);assert.throws(()=>selected(c,[1]),/Connect/);assert.throws(()=>selected(c,[0,0]),/Select/);
 });
-
-test('bass filter ignores small peaks and treble; strong bass triggers once, then rearms after release',async()=>{
- const {BassGate}=await import('../engine.mjs');const gate=new BassGate();let time=0;
- const feed=(bass,frames=1,options={},high=0)=>{let hits=0,last;for(let i=0;i<frames;i++){time+=20;last=gate.accept([...Array(3).fill(Math.round(bass*2.55)),...Array(13).fill(high)],time,options);hits+=Number(last.hit);}return {hits,last};};
- assert.equal(feed(10,20).hits,0);assert.equal(feed(10,20,{},255).hits,0,'treble alone does not trigger');
- for(let n=0;n<6;n++){assert.equal(feed(35,2).hits,0);feed(10,25);}
- assert.equal(feed(90).hits,1,'large bass onset triggers');assert.equal(feed(90,100).hits,0,'sustained bass does not retrigger after cooldown');
- feed(10,35);assert.equal(feed(90).hits,1,'fresh large hit after release');feed(10,10);assert.equal(feed(90).hits,0,'cooldown rejects a closely spaced hit');assert.equal(feed(90,60).hits,0,'rejected onset cannot become a delayed timer trigger');
- feed(10,40);assert.equal(feed(65,1,{bassThreshold:75}).hits,0,'higher threshold rejects medium hits');feed(10,40);assert.equal(feed(90,1,{bassThreshold:75}).hits,1);
- time+=2000;assert.equal(feed(95).hits,0,'reconnection cannot invent an onset');
+test('native commands resolve effect/palette names per firmware and preserve unrelated settings and segment boundaries',()=>{
+ const a=payload({fx:'Solid',pal:'Ocean'},device()),b=payload({fx:'Solid',pal:'Ocean'},device(true));assert.equal(a.seg[0].fx,0);assert.equal(b.seg[0].fx,1);assert.equal(a.seg[0].pal,1);assert.equal(b.seg[0].pal,0);assert.deepEqual(a.seg.map(s=>s.id),[0,1]);assert.ok(a.seg.every(s=>!('start'in s)&&!('stop'in s)&&!('col'in s)&&!('rev'in s)));
+ const bri=payload({bri:80},device());assert.equal(bri.seg,undefined);assert.deepEqual(bri.udpn,{send:false,rgrp:0,nn:true});const color=payload({color:{slot:1,rgb:[1,2,3]}},device());assert.deepEqual(color.seg[1].col,[{},{r:1,g:2,b:3,w:0},{}]);
+ assert.throws(()=>payload({fx:'Missing'},device()),/not available/);assert.throws(()=>payload({rb:true},device()),/Unknown/);assert.throws(()=>payload({bri:256},device()),/Invalid/);assert.throws(()=>payload({color:{slot:4,rgb:[0,0,0]}},device()),/RGB/);assert.deepEqual(catalog([device(),device(true)],'effects'),['Solid','Breathe']);assert.deepEqual(catalog([device(),{ok:false}],'effects'),[]);
 });
-test('bass defaults/migration and trigger settings validation preserve explicit choices',()=>{
- const old=defaults();old.groups[0].loopTrigger='beat';const migrated=cleanConfig(old);assert.equal(migrated.groups[0].loopTrigger,'bass');assert.equal(migrated.groups[0].bassThreshold,55);assert.equal(migrated.groups[0].bassGap,650);
- migrated.groups[0].loopTrigger='beat';migrated.groups[0].bassGap=-100;migrated.groups[0].bassThreshold=200;const clean=cleanConfig(migrated);assert.equal(clean.groups[0].loopTrigger,'beat');assert.equal(clean.groups[0].bassThreshold,95);assert.equal(clean.groups[0].bassGap,200);
+test('scenes retain per-segment colors and reject changed hardware, absent effects and missing segment IDs',()=>{
+ const a=device(),scene=captureScene(a),b=device(true);const p=scenePayload(scene,b);assert.equal(p.seg[0].fx,1);assert.equal(p.seg[1].fx,0);assert.deepEqual(p.seg[1].col,a.state.seg[1].col);assert.ok(!('start'in p.seg[1]));assert.throws(()=>scenePayload(scene,{...b,ip:'192.168.1.11'}),/previous/);assert.throws(()=>scenePayload(scene,{...b,effects:['Solid']}),/missing/);b.state.seg.pop();assert.throws(()=>scenePayload(scene,b),/layout changed/);
 });

@@ -1,35 +1,24 @@
-TubeRoom 1.2.3 — 2026-09-26
+TubeRoom 3.0.0 — 2026-09-27 UTC
 
-UI-only update: browser API harness passed after adding the main-screen
-sensitivity slider. Verified inverse threshold mapping at both ends,
-per-group persistence and hiding in timer mode. App JavaScript syntax
-check passed. The update builder validates the seven-file package.
-No physical hardware or Safari rendering test was available.
+9 automated tests passed with node --test test/*.test.mjs.
 
-Previous release validation (unchanged engine/server):
-TubeRoom 1.2.2 — 2026-09-26
+Automated checks:
+- Config migration from five legacy connections; private IP and target validation.
+- Different firmware effect/palette ordering resolves by name.
+- Existing segment bounds and untouched RGB slots are preserved.
+- Scenes restore per-bar/per-segment settings and reject missing capabilities.
+- HTTP integration with five mock controllers, multiple segments, two groups.
+- Offline preflight sends no changes; partial delivery failures are reported.
+- All-off attempts reachable bars even when another is offline.
+- No DDP output or ongoing rendering traffic; state/scenes persist after restart.
+- Legacy preferences remain untouched for app rollback.
+- Browser API harness: empty setup, group selection, mixed values, pagination,
+  native effect metadata, slider release, RGB edits, scene saving and app settings.
+- App-update integrity, version checks, restart recovery and rollback preserve data.
 
-11 automated tests passed with node --test test/*.test.mjs:
-- UI: two groups, RGB edits, tube mic selection, layout, no WebAudio.
-- Version 1 settings migration preserves connections, layout and colors.
-- Firmware effect-name discovery, RGB payloads, full-strip bounds, group isolation.
-- Free preset allocation and config validation.
-- Five mock controllers through HTTP: microphone rollback/sender switching,
-  preserved mic pins, timed playlist ownership/cleanup, restart persistence,
-  unreachable-controller recovery, blackout, live pixel sampling, zero DDP
-  output, no heartbeat dependency for autonomous effects.
-- Real UDP Audio Sync v2: beat-only color advances, source filtering, malformed
-  and duplicate trigger rejection, silence and lost-stream hold, group wrapping,
-  no beat-mode preset writes, Stop drains in-flight writes, restart/resume.
-- Bass filtering: weak hits/treble rejection, sustained bass and cooldown,
-  rearming after release, reconnect warmup, config migration and validation.
-- HTTP/UDP integration: independent bass thresholds, one hit per onset,
-  peak flags ignored in bass mode, live tuning preserves color indices.
-- UI: bass tuning dialog and per-group threshold/gap persistence.
-- Corrupt, incomplete, malicious and downgrade app-update rejection.
-- App update restart, failed-start recovery and rollback preserve settings.
-- Feed checking validates downloads; offline failure leaves installation intact.
+Run: node --test test/*.test.mjs
+JavaScript and launcher syntax checked. Update package validated by the builder.
 
-Syntax checks passed for all executable app files. Update package validated.
-No physical WLED hardware or real Safari viewport testing was available.
-Browser binary was unavailable; UI verified using the browser API harness.
+No physical WLED hardware or real Safari rendering was available.
+A browser download was blocked by the environment; no pixel/viewport test is claimed.
+Compact desktop breakpoints are implemented but require checking on the user's Mac.

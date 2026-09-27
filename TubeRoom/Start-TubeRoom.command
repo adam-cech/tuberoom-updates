@@ -5,9 +5,9 @@ TUBEROOM_APP_DIR="$PWD"
 TUBEROOM_RUNTIME_DIR="$HOME/Library/Application Support/TubeRoom/runtime"
 TUBEROOM_NODE=""
 fail() { echo; echo "$1"; echo; read -r -p 'Press Return to close.'; exit 1; }
-echo 'TubeRoom — light follows sound.'
-echo 'Keep this window open while you use your lights.'
-if /usr/bin/curl -fsS --max-time 1 http://127.0.0.1:8788/api/state 2>/dev/null | /usr/bin/grep -q '"effects"'; then
+echo 'TubeRoom v3 — five bars, one remote.'
+echo 'Keep this window open to use the remote. Native effects keep running if you close it.'
+if /usr/bin/curl -fsS --max-time 1 http://127.0.0.1:8788/api/state 2>/dev/null | /usr/bin/grep -q '"pid"'; then
   /usr/bin/open -a Safari http://127.0.0.1:8788
   exit 0
 fi
@@ -48,5 +48,5 @@ fi
 ) &
 echo
 echo 'Opening Safari at http://127.0.0.1:8788'
-echo 'Your Mac will stay awake while this window is running.'
-/usr/bin/caffeinate -di "$TUBEROOM_NODE" "$TUBEROOM_APP_DIR/runner.mjs"
+echo 'Your bars render their own effects; the Mac can sleep.'
+exec "$TUBEROOM_NODE" "$TUBEROOM_APP_DIR/runner.mjs"

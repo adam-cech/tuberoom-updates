@@ -11,13 +11,13 @@ test('install, automatic restart, failed-start recovery and manual rollback pres
  t.after(async()=>{child.kill('SIGTERM');if(child.exitCode===null)await new Promise(r=>child.once('exit',r));fs.rmSync(data,{recursive:true,force:true});});
  let state;async function ready(version){for(let i=0;i<120;i++){try{const res=await fetch('http://127.0.0.1:18790/api/state');const s=await res.json();if(s.version===version){state=s;return s;}}catch{}await delay(60);}throw Error('App did not start version '+version+': '+errors);}
  const post=async(route,b={})=>{const r=await fetch('http://127.0.0.1:18790/api/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-TubeRoom-Token':state.token,'X-TubeRoom-Client':'updater-test'},body:JSON.stringify(b)});return {code:r.status,...await r.json()};};
- await ready(originalVersion);await delay(350);assert.equal((await post('update/status')).managed,true);state.config.groups[0].brightness=.43;state.config.groups[0].colors[0]='#123456';await post('config',{groups:state.config.groups});
+ await ready(originalVersion);await delay(350);assert.equal((await post('update/status')).managed,true);state.config.groups[0].name='Front stage';await post('config',{groups:state.config.groups});
  await post('update/source',{url:'https://example.com/latest.tuberoom-update.json'});const firstPID=state.pid;
- assert.equal((await post('update/install',{bundle:bundle(newVersion)})).code,200);await ready(newVersion);await delay(350);assert.notEqual(state.pid,firstPID);assert.equal(state.config.groups[0].brightness,.43);assert.equal(state.config.groups[0].colors[0],'#123456');assert.equal((await post('update/status')).source,'https://example.com/latest.tuberoom-update.json');assert.equal(pointer(data).pending,false);
+ assert.equal((await post('update/install',{bundle:bundle(newVersion)})).code,200);await ready(newVersion);await delay(350);assert.notEqual(state.pid,firstPID);assert.equal(state.config.groups[0].name,'Front stage');assert.equal(state.config.groups[0].name,'Front stage');assert.equal((await post('update/status')).source,'https://example.com/latest.tuberoom-update.json');assert.equal(pointer(data).pending,false);
  assert.equal((await post('update/install',{bundle:bundle(badVersion,true)})).code,200);
  // Wait until the failed release has actually exited, then check restoration.
- await delay(900);await ready(newVersion);await delay(350);assert.match((await post('update/status')).notice,/could not start/);assert.equal(state.config.groups[0].brightness,.43);
- assert.equal((await post('update/rollback')).code,200);await ready(originalVersion);assert.equal(state.config.groups[0].colors[0],'#123456');assert.equal((await post('update/status')).canRollback,false);
+ await delay(900);await ready(newVersion);await delay(350);assert.match((await post('update/status')).notice,/could not start/);assert.equal(state.config.groups[0].name,'Front stage');
+ assert.equal((await post('update/rollback')).code,200);await ready(originalVersion);assert.equal(state.config.groups[0].name,'Front stage');assert.equal((await post('update/status')).canRollback,false);
 });
 
 test('online checks download a validated bundle without installing and leave state intact on network failure',async t=>{
