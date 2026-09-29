@@ -1,24 +1,20 @@
-TubeRoom 3.0.0 — 2026-09-27 UTC
+TubeRoom 4.0.0 — 2026-09-29
 
-9 automated tests passed with node --test test/*.test.mjs.
+11 automated tests passed.
 
-Automated checks:
-- Config migration from five legacy connections; private IP and target validation.
-- Different firmware effect/palette ordering resolves by name.
-- Existing segment bounds and untouched RGB slots are preserved.
-- Scenes restore per-bar/per-segment settings and reject missing capabilities.
-- HTTP integration with five mock controllers, multiple segments, two groups.
-- Offline preflight sends no changes; partial delivery failures are reported.
-- All-off attempts reachable bars even when another is offline.
-- No DDP output or ongoing rendering traffic; state/scenes persist after restart.
-- Legacy preferences remain untouched for app rollback.
-- Browser API harness: empty setup, group selection, mixed values, pagination,
-  native effect metadata, slider release, RGB edits, scene saving and app settings.
-- App-update integrity, version checks, restart recovery and rollback preserve data.
+Automated coverage:
+- Five-tube migration and A/B/C assignment; per-group selection and scene targets.
+- GUI boot, effect pagination, color disc initialization, supported RGB slots,
+  fourth-slot disabled state, firmware-required Beat Pulse explanation.
+- Native Noisemeter and custom Beat Pulse require verified onboard audio support.
+- Sound Brightness uses stock Juggles, Color 1, one logical pixel per segment,
+  sensitivity-free volume blending and an RGB background minimum glow.
+- Grouping/spacing/mapping restoration after effect changes and app restart.
+- Sound Brightness scenes retain their mode and minimum glow.
+- No controller firmware flashing, DDP output or computer audio processing.
+- Five mock controllers: native IDs, isolation, preflight and partial failures.
+- Update integrity, automatic restart, failed-release recovery and rollback.
 
-Run: node --test test/*.test.mjs
-JavaScript and launcher syntax checked. Update package validated by the builder.
-
-No physical WLED hardware or real Safari rendering was available.
-A browser download was blocked by the environment; no pixel/viewport test is claimed.
-Compact desktop breakpoints are implemented but require checking on the user's Mac.
+Run node --test test/*.test.mjs for the current results.
+App JavaScript and launcher syntax checked; update builder verifies file hashes.
+No physical WLED or Safari viewport test has been performed.

@@ -1,13 +1,14 @@
 import http from 'node:http';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import crypto from 'node:crypto';import {fileURLToPath} from 'node:url';
-import {defaults,cleanConfig,privateIP,selected,payload,validatePatch,captureScene,scenePayload} from './engine.mjs';
+import {defaults,cleanConfig,privateIP,selected,payload,validatePatch,captureScene,scenePayload,brightnessSnapshot,brightnessPayload,brightnessActive,restoreBrightnessGeometry} from './engine.mjs';
 import {LIMIT,atomicJSON,readJSON,updaterInfo,setSource,fetchUpdate,installBundle,rollback} from './updater.mjs';
 const ROOT=path.dirname(fileURLToPath(import.meta.url)),PKG=readJSON(path.join(ROOT,'package.json'),{}),PORT=Number(process.env.TUBEROOM_PORT||8788),TEST=process.env.TUBEROOM_TEST==='1';
 const DATA=process.env.TUBEROOM_DATA||path.join(os.homedir(),'Library','Application Support','TubeRoom');fs.mkdirSync(DATA,{recursive:true});
 if(PKG.updateSource&&!fs.existsSync(path.join(DATA,'update-source.json')))setSource(DATA,PKG.updateSource);
 // Keep v1 preferences/session files intact so app rollback remains possible.
-let config=cleanConfig(readJSON(path.join(DATA,'settings-v3.json'),readJSON(path.join(DATA,'settings.json'),defaults())),defaults(),TEST);
-let scenes=readJSON(path.join(DATA,'scenes-v3.json'),[]),devices={},busy=false,restarting=false,pendingUpdate=null;
-const token=crypto.randomBytes(24).toString('hex'),file=(n)=>path.join(DATA,n),save=()=>atomicJSON(file('settings-v3.json'),config);
+let config=cleanConfig(readJSON(path.join(DATA,'settings-v4.json'),readJSON(path.join(DATA,'settings-v3.json'),readJSON(path.join(DATA,'settings.json'),defaults()))),defaults(),TEST);
+let profiles=readJSON(path.join(DATA,'profiles-v4.json'),{});
+let scenes=readJSON(path.join(DATA,'scenes-v4.json'),readJSON(path.join(DATA,'scenes-v3.json'),[])),devices={},busy=false,restarting=false,pendingUpdate=null;
+const token=crypto.randomBytes(24).toString('hex'),file=(n)=>path.join(DATA,n),save=()=>atomicJSON(file('settings-v4.json'),config);
 // The original Mac launcher looks for the effects key when detecting an already-running app.
 const state=()=>({version:PKG.version,pid:process.pid,effects:[],config,devices,busy,scenes:scenes.map(({id,name,bars})=>({id,name,ids:bars.map(b=>b.id)})),token});
 const connected=()=>config.tubes.filter(t=>t.ip&&t.enabled);
@@ -19,21 +20,38 @@ async function wled(ip,route='/json',data,timeout=2800){
 }
 async function probe(t,full=false){
  try{const old=devices[t.id],j=await wled(t.ip,full||!old?.ok?'/json':'/json/state');
-  if(full||!old?.ok){if(!j.state||!Array.isArray(j.effects)||!j.effects.length||!Array.isArray(j.palettes)||!Number.isInteger(j.info?.leds?.count))throw Error('No valid WLED data. Check the IP.');let fxdata=[];try{fxdata=await wled(t.ip,'/json/fxdata',undefined,1200);}catch{}
-   devices[t.id]={id:t.id,ip:t.ip,name:t.name,ok:true,version:j.info.ver,count:j.info.leds.count,effects:j.effects,palettes:j.palettes,fxdata:Array.isArray(fxdata)?fxdata:[],state:j.state,at:Date.now()};
-  }else{if(!Array.isArray(j.seg))throw Error('Invalid WLED state.');devices[t.id]={...old,name:t.name,state:j,at:Date.now(),ok:true};}return devices[t.id];
+  if(full||!old?.ok){if(!j.state||!Array.isArray(j.effects)||!j.effects.length||!Array.isArray(j.palettes)||!Number.isInteger(j.info?.leds?.count))throw Error('No valid WLED data. Check the IP.');let fxdata=[],ar;await Promise.allSettled([(async()=>{fxdata=await wled(t.ip,'/json/fxdata',undefined,1200);})(),(async()=>{const cfg=await wled(t.ip,'/json/cfg',undefined,1200);ar=cfg.um?.AudioReactive;})()]);
+   devices[t.id]={id:t.id,ip:t.ip,name:t.name,ok:true,version:j.info.ver,beatPulse:j.info.tuberoom?.beatPulse===1,audio:{available:!!ar,enabled:ar?.enabled===true,mode:ar?.sync?.mode},count:j.info.leds.count,effects:j.effects,palettes:j.palettes,fxdata:Array.isArray(fxdata)?fxdata:[],state:j.state,at:Date.now()};
+  }else{if(!Array.isArray(j.seg))throw Error('Invalid WLED state.');devices[t.id]={...old,name:t.name,state:j,at:Date.now(),ok:true};}devices[t.id].soundBrightness={active:brightnessActive(devices[t.id],profiles[t.ip]),floor:profiles[t.ip]?.floor??8};return devices[t.id];
  }catch(e){devices[t.id]={id:t.id,ip:t.ip,name:t.name,ok:false,error:e.message,at:Date.now()};throw Error(`${t.name}: ${e.message}`);}
 }
 async function refresh(full=false){await Promise.allSettled(connected().map(t=>probe(t,full)));}
 async function locked(fn){if(busy)throw Error('Another change is in progress. Try again.');busy=true;try{return await fn();}finally{busy=false;}}
-async function dispatch(bars,make){
+async function dispatch(bars,make,hooks={}){
  // Read every target and validate all commands before sending any light changes.
  const reads=await Promise.allSettled(bars.map(t=>probe(t,true)));const failed=reads.filter(r=>r.status==='rejected');if(failed.length)throw Error('Nothing changed. '+failed.map(r=>r.reason.message).join(' · '));
  const commands=bars.map(t=>({t,p:make(t,devices[t.id])}));
+ hooks.before?.();
  const results=await Promise.allSettled(commands.map(({t,p})=>wled(t.ip,'/json/state',p)));
+ hooks.after?.(results,commands);
  await Promise.allSettled(bars.map(t=>probe(t)));
  return {results:results.map((r,i)=>({id:bars[i].id,name:bars[i].name,ok:r.status==='fulfilled',error:r.status==='rejected'?r.reason.message:undefined})),...state()};
 }
+function profileHooks(updates,clear){return {before(){Object.assign(profiles,updates);atomicJSON(file('profiles-v4.json'),profiles);},after(results,commands){results.forEach((r,i)=>{if(r.status==='fulfilled'&&clear.has(commands[i].t.ip))delete profiles[commands[i].t.ip];});atomicJSON(file('profiles-v4.json'),profiles);}};}
+async function control(bars,p){const updates={},clear=new Set();return dispatch(bars,(t,d)=>{
+ const old=profiles[t.ip],active=brightnessActive(d,old);
+ if(p.fx==='Sound Brightness'||active&&!p.fx&&('floor'in p||p.color)){
+  if(p.color&&p.color.slot!==0)throw Error('Sound Brightness uses the primary color. Minimum glow sets its dim level.');
+  const out=brightnessPayload(p,d,old);updates[t.ip]={...(old||brightnessSnapshot(d)),floor:p.floor??old?.floor??8};return out;
+ }
+ if('floor'in p)throw Error('Select Sound Brightness before changing minimum glow.');
+ const out=payload(p,d);if(p.fx&&old){restoreBrightnessGeometry(out,d,old);clear.add(t.ip);}return out;
+ },profileHooks(updates,clear));}
+async function recallScene(scene){const updates={},clear=new Set();return dispatch(selected(config,scene.bars.map(x=>x.id)),(t,d)=>{
+ const saved=scene.bars.find(x=>x.id===t.id),out=scenePayload(saved,d),old=profiles[t.ip];
+ if(saved.soundBrightness){const captured={...d,state:{...d.state,seg:d.state.seg.map(s=>({...s,col:out.seg.find(x=>x.id===s.id)?.col||s.col}))}};const sb=brightnessPayload({floor:saved.soundBrightness.floor},captured,old);updates[t.ip]={...(old||brightnessSnapshot(d)),floor:saved.soundBrightness.floor};return {...out,seg:sb.seg};}
+ if(old){restoreBrightnessGeometry(out,d,old);clear.add(t.ip);}return out;
+ },profileHooks(updates,clear));}
 async function blackout(){
  const bars=connected();const results=await Promise.allSettled(bars.map(t=>wled(t.ip,'/json/state',{on:false,transition:0,udpn:{send:false,rgrp:0,nn:true}})));
  await Promise.allSettled(bars.map(t=>probe(t)));return {...state(),results:results.map((r,i)=>({id:bars[i].id,name:bars[i].name,ok:r.status==='fulfilled',error:r.status==='rejected'?r.reason.message:undefined}))};
@@ -53,19 +71,19 @@ const server=http.createServer(async(req,res)=>{
    switch(url.pathname){
     case '/api/config':result=await locked(async()=>{const next=cleanConfig(b,config,TEST);for(const t of next.tubes)if(t.ip!==config.tubes[t.id].ip||t.enabled!==config.tubes[t.id].enabled)delete devices[t.id];config=next;save();return state();});break;
     case '/api/refresh':result=await locked(async()=>{await refresh(!!b.full);return state();});break;
-    case '/api/control':validatePatch(b.patch);result=await locked(()=>dispatch(selected(config,b.ids),(_,d)=>payload(b.patch,d)));break;
+    case '/api/control':validatePatch(b.patch);result=await locked(()=>control(selected(config,b.ids),b.patch));break;
     case '/api/blackout':result=await locked(blackout);break;
     case '/api/preview':{const results=await Promise.allSettled(connected().map(async t=>{const p=await wled(t.ip,'/json/live',undefined,1000);if(!Array.isArray(p.leds)||p.leds.length>2000||!p.leds.every(c=>typeof c==='string'&&/^[\da-f]{6}$/i.test(c)))throw Error('Preview not supported');return {id:t.id,leds:p.leds,at:Date.now()};}));result={previews:results.filter(r=>r.status==='fulfilled').map(r=>r.value)};break;}
     case '/api/networks':result={networks:networks()};break;
     case '/api/scan':result=await locked(()=>scan(String(b.prefix||'')));break;
-    case '/api/scene/save':result=await locked(async()=>{const bars=selected(config,b.ids),name=String(b.name||'').trim().slice(0,36);if(!name)throw Error('Name this scene.');if(scenes.length>=12)throw Error('You can save 12 scenes. Remove one first.');await Promise.all(bars.map(t=>probe(t,true)));scenes.push({id:crypto.randomUUID(),name,bars:bars.map(t=>({id:t.id,...captureScene(devices[t.id])}))});atomicJSON(file('scenes-v3.json'),scenes);return state();});break;
-    case '/api/scene/apply':result=await locked(async()=>{const scene=scenes.find(s=>s.id===b.id);if(!scene)throw Error('Scene not found.');return dispatch(selected(config,scene.bars.map(x=>x.id)),(t,d)=>scenePayload(scene.bars.find(x=>x.id===t.id),d));});break;
-    case '/api/scene/delete':result=await locked(async()=>{scenes=scenes.filter(s=>s.id!==b.id);atomicJSON(file('scenes-v3.json'),scenes);return state();});break;
+    case '/api/scene/save':result=await locked(async()=>{const bars=selected(config,b.ids),name=String(b.name||'').trim().slice(0,36);if(!name)throw Error('Name this scene.');if(scenes.length>=12)throw Error('You can save 12 scenes. Remove one first.');await Promise.all(bars.map(t=>probe(t,true)));scenes.push({id:crypto.randomUUID(),name,bars:bars.map(t=>({id:t.id,...captureScene(devices[t.id])}))});atomicJSON(file('scenes-v4.json'),scenes);return state();});break;
+    case '/api/scene/apply':result=await locked(async()=>{const scene=scenes.find(s=>s.id===b.id);if(!scene)throw Error('Scene not found.');return recallScene(scene);});break;
+    case '/api/scene/delete':result=await locked(async()=>{scenes=scenes.filter(s=>s.id!==b.id);atomicJSON(file('scenes-v4.json'),scenes);return state();});break;
     case '/api/update/status':result=updaterInfo(DATA,PKG.version);break;
     case '/api/update/source':setSource(DATA,String(b.url||''));pendingUpdate=null;result=updaterInfo(DATA,PKG.version);break;
     case '/api/update/check':{const u=await fetchUpdate(DATA,PKG.version);pendingUpdate=u.available?u.bundle:null;result={available:u.available,version:u.version,notes:u.notes};break;}
     case '/api/update/install':case '/api/update/rollback':{
-     if(process.env.TUBEROOM_MANAGED!=='1')throw Error('Reopen with Start-TubeRoom.command to update.');if(busy)throw Error('Wait for the current command.');
+     if(process.env.TUBEROOM_MANAGED!=='1')throw Error('Reopen with Start-TubeRoom.command to update.');if(busy)throw Error('Wait for the current command.');if(url.pathname.endsWith('rollback')&&Object.keys(profiles).length)throw Error('Choose another effect for Sound Brightness bars first, to restore their LED grouping before returning to the previous app.');
      if(url.pathname.endsWith('install')){const bundle=b.bundle||pendingUpdate;if(!bundle)throw Error('Check for updates or choose an update file.');result=installBundle(DATA,bundle,PKG.version);}else result=rollback(DATA);
      restarting=true;result.restarting=true;setTimeout(()=>shutdown(75),300);break;}
     default:reply(res,404,{error:'Unknown action.'});return;

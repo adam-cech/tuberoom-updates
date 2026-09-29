@@ -1,52 +1,56 @@
-# TubeRoom 3.0 — five bars, one native WLED remote
+# TubeRoom 4.0 — sound lives on the tubes
 
-A fresh interface around the controls already on your five WLED bars. Select one bar, an arbitrary selection, a group, or all five; choose a native effect; change brightness, colors, palette and effect controls. WLED performs audio processing and renders effects. The app sends settings only when you change something. No firmware changes, pixel streaming or Mac microphone capture.
+V4 follows the supplied sketch: five tubes and an A/B/C group matrix on the left; a five-bar preview above effects; an always-visible RGB color disc, basic colors, brightness and effect controls on the right. Scenes and in-app updates remain available. Native sound capture, analysis and animation run entirely inside WLED, including when the Mac is asleep or disconnected.
 
-## Upgrade without reinstalling
+## Sound Brightness — no firmware change
 
-In TubeRoom 1.2.x, use **Stop & restore**, then **Updates → Check for updates → Install & restart**. The existing Mac launcher still works. Your bar addresses, names, enabled status and group assignments import into v3. Nothing is sent to the lights just by opening the app. V3 reads the actual WLED state, rather than restoring an old effect automatically.
+Select your tubes → **Sound Brightness ♫** → choose a color. The full length of each active segment gets brighter and dimmer together, rather than showing a changing number of LEDs. **Minimum glow** (default 8%, adjustable 1–50%) sets the dim level between sounds; global Brightness caps the overall output. A black chosen color or power/brightness set to zero still turns the LEDs dark.
 
-V3 stores its preferences separately in `settings-v3.json` and scenes in `scenes-v3.json` in the existing TubeRoom application-support folder. Older preferences and session files remain intact. **Settings → Update source & recovery → Restore previous app** rolls back the app. The source of the previous release is also retained on branch `stable-v1.2.3`.
+This configures an existing WLED effect, not newly uploaded effect code. The native **Juggles** effect blends from background to foreground using the tube's smoothed volume. Grouping all physical LEDs in a segment into one logical pixel makes that volume response uniform. The **Color 1** palette keeps the selected hue steady. A dim version of that same RGB color becomes the background. No audio data is sent to the Mac and no recurring brightness commands are generated there.
 
-For a fresh installation, download the source folder and double-click `Start-TubeRoom.command`. It installs its own Node runtime if needed, then opens Safari at `http://127.0.0.1:8788`. This requires internet only for the first runtime download and online app updates; lighting control is local. The updated source launcher lets the Mac sleep; an older installed launcher may still keep it awake until closed.
+It responds to overall sound level, not specifically kick drums. Compared with Noisemeter it uses smoothed volume rather than Noisemeter's raw-volume length calculation. The response depends on WLED's mic gain, noise floor, AGC, output limits and sound source. This is a practical stock-effect configuration for the requested behavior, not a bit-for-bit rewrite of Noisemeter.
 
-## Everyday use
+Requirements are checked on every selected tube: enabled AudioReactive, installed Juggles effect, the built-in Color 1 palette, and existing segments of at most 255 physical LEDs each (100-LED bars qualify). Failed checks do not silently substitute simulated audio. Grouped multi-segment bars retain their boundaries; each segment responds as a unit.
 
-1. **Connect bars**: enter WLED IP addresses or scan the current local network. Assign Group A/B and rename them if desired. Save & connect checks every enabled bar. Existing microphone routing is preserved.
-2. **Choose your bars**: click bar cards to toggle an arbitrary selection, or select all connected slots / either group. Offline bars remain visibly offline; reconnect them before normal multi-bar changes.
-3. **Find a look**: browse or search effects reported by all selected controllers. The paginated grid keeps the main screen compact. Audio-reactive and matrix effects are marked from firmware metadata. A matrix effect may not suit a one-dimensional bar. Native sound effects require the right WLED build and working microphone configuration.
-4. **Make it yours**: sliders apply when released. Only the changed control is sent. If bars have different values, the UI shows Mixed. Picking one effect does not overwrite unrelated colors, brightness or segment boundaries. Effect metadata determines which controls are useful; Solid only shows its primary color.
-5. **Save a scene**: captures current settings for the selected bars, including different effects/colors per bar. Recalling affects those recorded bars, not the current selection. Up to 12 scenes live in TubeRoom; controller preset slots are untouched. Custom palettes absent from WLED's named palette list cannot be saved in app scenes; use WLED for those.
+### Restoring the normal spatial effects
 
-**Turn off** targets the selection. **All off** attempts every configured, enabled bar even if another is unreachable. Delivery failures are reported per bar. Closing Safari or the launcher does not stop native WLED effects.
+TubeRoom saves the previous grouping, spacing, offset, mirror/mapping, palette and background before activating Sound Brightness. Choose another effect **through TubeRoom** to restore those values. This restoration works after restarting the app and when recalling scenes. If you change effects directly in WLED, its grouping remains in place; switch through TubeRoom or restore grouping manually in WLED. App rollback is blocked while grouping restorations are outstanding, with a message explaining how to restore first.
 
-## What this first v3 includes
+The restoration file is `profiles-v4.json` in the existing application-support folder. Keep it alongside your settings. If a controller's segment boundaries change externally, restore its grouping in WLED rather than blindly applying old geometry. No segment boundaries, LED count, wiring or firmware are altered by this mode.
 
-- Five independent bars, arbitrary multi-selection, two named groups.
-- Native power, brightness, transitions, installed effects and built-in palettes.
-- Three native RGB slots when used by the effect; system color picker, hex, channel fields and color swatches.
-- Native speed/intensity, extra effect parameters and options when reported by firmware; reverse/mirror controls.
-- Scene capture and recall across multiple bars, with settings stored per bar and segment.
-- Actual-state polling; optional `/json/live` sampled-pixel preview. The default five-bar display is a color guide, not simulated effect playback. Unsupported/stale live samples fall back to that guide.
-- Manual IP connection, local subnet discovery, status reporting, update installation and rollback.
-- Sky-blue/black desktop layout using available viewport height, with compact breakpoints and paginated effects. Mobile layouts scroll. Dialogs and the saved-scene list can scroll when needed.
+## Noisemeter and Beat Pulse are different
 
-## Deliberate boundaries
+**Noisemeter ♫** remains the original onboard WLED volume-to-length effect. Its Width and Fade rate parameters appear as supplied by the firmware. It measures overall sound energy, so a full bar is not proof of a kick.
 
-This is a native-control foundation, not every WLED settings page. Hardware configuration, LED count/color order, segment editing, built-in controller presets/playlists, RGBW/CCT and microphone routing remain in each bar's WLED UI. **Connect bars → Open**, or **More effect controls → Open in WLED**, gets you there. Native audio effects are available if installed; v1's custom bass/beat relay and draggable room layout are not included in this reset.
+**Beat Pulse ♫** is shown as **Firmware required** on stock WLED. The proposed strong-hit threshold, release/rearm and kick filtering cannot be installed as an app-only preset. V4 does not implement it using a Mac microphone, network-audio processing, timer, or a misleading alias for another effect. A future compatible tube firmware must expose both the Beat Pulse effect and a verified TubeRoom capability marker before V4 will enable it. No such firmware binary is included or flashed in this release.
 
-Controls target all existing active segments on each selected bar without changing their boundaries. Commands match effects and palettes by name across firmware builds. Sharing settings is not frame-locked effect synchronization; random effects and different segment geometry may look different. Palette choice and effect algorithms determine how RGB colors appear, and screen colors cannot calibrate physical LEDs.
+## Groups, color and scenes
 
-Normal WLED notification send and receive groups are disabled on bars receiving app commands so group changes do not spread outside the selection. This persists on the controller until changed in WLED Sync settings. Audio sync is a separate mechanism and is not changed. The app never changes Wi-Fi, microphone pins, firmware, LED wiring or WLED preset files.
+- Select one or several tube-name buttons, All five, or a group button.
+- A/B/C radio dots assign each tube to exactly one group. Group membership changes only the saved app configuration, not current lighting.
+- Choose a color on the RGB disc or a basic swatch, select a supported color slot, then click Apply color. RGB / hex opens exact channel entry.
+- Stock WLED has up to three RGB slots per effect. The fourth slot in the sketch is shown disabled; unused slots are also disabled. Effects that generate their own colors may ignore RGB input. Palette and transition controls are under More effect controls.
+- Save current creates a local scene for the selected tubes. Recalling targets those recorded tubes. Sound Brightness mode, minimum glow and per-segment colors are retained by scenes.
+- The default preview is a clearly labeled color guide. Live samples optionally reads actual WLED pixels. Neither preview method drives the LEDs or processes audio.
 
-## Failure handling and validation
+Changes are checked across all selected tubes before sending. Independent requests may still partly fail once sent; the app reports those failures. All off attempts every configured enabled tube even if another is offline. Native effects are not guaranteed to be phase-locked across controllers.
 
-Before normal commands, read every target and validate support on all targets. If a read or capability check fails, send no changes. Once sending begins, independent network requests can still partially fail; the UI names those bars rather than pretending the change was atomic. All-off bypasses preflight and sends concurrently to all configured enabled bars. If clicked during another action, it runs immediately after that action completes.
+Normal WLED state notification send/receive groups are disabled on controlled tubes to prevent changes spreading to unselected groups. Audio sync configuration is separate and remains untouched. Each tube can process its local mic, or receive audio data processed by another WLED tube, according to its existing AudioReactive configuration. No sound input or FFT runs on the computer.
 
-The server binds to loopback, validates the Host and browser Origin, requires a session token for writes, limits request sizes and accepts only private IPv4 device addresses. Public addresses, duplicate IPs and arbitrary WLED commands are rejected. Developer loopback mocks require explicit `TUBEROOM_TEST=1`.
+## Upgrade
 
-Run `node --test test/*.test.mjs`. Tests cover five mock controllers with different effect/palette ordering and multiple segments, group isolation, RGB slot preservation, offline preflight, partial write failure, all-off, scenes, setup migration, legacy preference preservation, startup/rollback, update integrity, and UI behavior. The UI harness is not a browser layout engine. Real Safari viewport rendering and physical WLED hardware were unavailable; verify fit, sound behavior and actual colors on the rig.
+From v3: **Settings → Check for updates → Install & restart**. From v1.2: Stop & restore first, then use its Updates dialog. Existing launcher and update URL remain valid; no reinstall is needed.
 
-Build the seven-file in-app package with `node scripts/build-update.mjs updates/latest.tuberoom-update.json "Release notes"`.
+V4 imports existing IPs, names, group A/B assignments and scenes. Group C starts empty. New settings/scenes use `settings-v4.json` / `scenes-v4.json`, leaving previous versions intact. Source recovery branches preserve prior releases. Hardware settings and controller presets remain in the native WLED interface, available through Connect bars → Open.
 
-References: [official WLED JSON API and effect metadata](https://kno.wled.ge/interfaces/json-api/) and WLED v0.15.1 `wled00/json.cpp` / effect source. Firmware capabilities and APIs vary; the app resolves available effect and palette names from each device.
+For a fresh installation, double-click Start-TubeRoom.command and visit http://127.0.0.1:8788. Network discovery scans only a private IPv4 subnet connected to the Mac. The Node runtime is downloaded only if needed on the first launch. Online updates require internet; lighting control does not.
+
+## Validation and limits
+
+Run `node --test test/*.test.mjs`. Tests cover setup migration, three-group UI behavior, native-effect mapping, capability checks, Sound Brightness grouping and minimum-glow commands, original geometry restoration after restart, scene recall, five simulated WLED controllers, offline/partial failures, update integrity and rollback. These verify application behavior and command structure; they are not physical audio/LED tests.
+
+The implementation was checked against official WLED v0.15.1 `mode_juggles`, `mode_noisemeter` and JSON source. Real tubes and Safari viewport rendering were not available. Compact desktop breakpoints are implemented, but actual response and screen fit still need checking on the user's setup. No flashable firmware is provided or required for Sound Brightness.
+
+Reference: [WLED JSON API, grouping and effect metadata](https://kno.wled.ge/interfaces/json-api/). Source logic: WLED v0.15.1 `wled00/FX.cpp`, `mode_juggles` (clamped smoothed volume blend) and `mode_noisemeter` (raw volume mapped to length).
+
+Build the update: `node scripts/build-update.mjs updates/latest.tuberoom-update.json "Release notes"`.

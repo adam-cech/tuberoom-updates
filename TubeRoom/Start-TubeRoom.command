@@ -5,7 +5,7 @@ TUBEROOM_APP_DIR="$PWD"
 TUBEROOM_RUNTIME_DIR="$HOME/Library/Application Support/TubeRoom/runtime"
 TUBEROOM_NODE=""
 fail() { echo; echo "$1"; echo; read -r -p 'Press Return to close.'; exit 1; }
-echo 'TubeRoom v3 — five bars, one remote.'
+echo 'TubeRoom v4 — five bars, one remote.'
 echo 'Keep this window open to use the remote. Native effects keep running if you close it.'
 if /usr/bin/curl -fsS --max-time 1 http://127.0.0.1:8788/api/state 2>/dev/null | /usr/bin/grep -q '"pid"'; then
   /usr/bin/open -a Safari http://127.0.0.1:8788

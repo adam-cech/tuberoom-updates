@@ -1,9 +1,9 @@
-# TubeRoom v3
+# TubeRoom v4
 
-A simpler native WLED remote for five light bars. Select bars or groups, browse installed effects, adjust brightness and RGB colors, and save multi-bar scenes.
+A five-tube WLED controller based on the supplied layout sketch: A/B/C groups, preview above effects, RGB color disc and saved scenes.
 
-[Source and setup guide](TubeRoom/README.md) · [Previous 1.2.3 source](https://github.com/adam-cech/tuberoom-updates/tree/stable-v1.2.3)
+**Sound Brightness** keeps the full tube lit and varies its brightness with onboard sound volume, using stock WLED Juggles. No firmware change or Mac audio processing is needed. Minimum glow sets the dim background. Custom kick-triggered Beat Pulse remains firmware-required.
 
-Existing users: Stop & restore in the old app, then Updates → Check for updates → Install & restart. Connections import automatically; no new installation is required.
+[Source and setup guide](TubeRoom/README.md) · [Previous v3 source](https://github.com/adam-cech/tuberoom-updates/tree/stable-v3.0.0)
 
-The root `latest.tuberoom-update.json` is the permanent in-app update feed.
+Use the existing in-app updater; no reinstall is needed. The permanent feed is `latest.tuberoom-update.json`.

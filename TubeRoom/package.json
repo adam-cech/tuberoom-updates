@@ -1,5 +1,5 @@
 {
- "name":"tube-room","version":"3.0.0","private":true,"type":"module",
+ "name":"tube-room","version":"4.0.0","private":true,"type":"module",
  "description":"A simpler native WLED remote for five light bars.",
  "engines":{"node":">=20"},"scripts":{"start":"node runner.mjs","test":"node --test test/*.test.mjs","build:update":"node scripts/build-update.mjs"},
  "updateSource":"https://raw.githubusercontent.com/adam-cech/tuberoom-updates/refs/heads/main/latest.tuberoom-update.json"
